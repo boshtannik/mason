@@ -1,11 +1,5 @@
 use crate::api::OpenCodeClient;
-
-#[derive(serde::Serialize)]
-pub struct PermissionReply {
-    pub response: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub remember: Option<bool>,
-}
+use crate::types::event::PermissionReplyKind;
 
 impl OpenCodeClient {
     /// POST /session/{sessionID}/permissions/{permissionID} — ответить на запрос разрешения.
@@ -13,16 +7,22 @@ impl OpenCodeClient {
         &self,
         session_id: &str,
         permission_id: &str,
-        response: &str,
-        remember: Option<bool>,
+        response: &PermissionReplyKind,
     ) -> Result<bool, String> {
         let url = format!(
             "{}/session/{session_id}/permissions/{permission_id}",
             self.base
         );
-        let body = PermissionReply {
-            response: response.to_string(),
-            remember,
+        #[derive(serde::Serialize)]
+        struct Body {
+            response: &'static str,
+        }
+        let body = Body {
+            response: match response {
+                PermissionReplyKind::Once => "once",
+                PermissionReplyKind::Always => "always",
+                PermissionReplyKind::Reject => "reject",
+            },
         };
         let resp = self
             .authed(self.http.post(&url))

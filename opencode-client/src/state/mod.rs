@@ -44,7 +44,17 @@ impl AppState {
                     .iter()
                     .filter_map(|p| match p {
                         crate::types::message::Part::Text { text, .. } => Some(text.clone()),
-                        _ => None,
+                        crate::types::message::Part::Reasoning { .. }
+                        | crate::types::message::Part::File { .. }
+                        | crate::types::message::Part::Tool { .. }
+                        | crate::types::message::Part::StepStart { .. }
+                        | crate::types::message::Part::StepFinish { .. }
+                        | crate::types::message::Part::Snapshot { .. }
+                        | crate::types::message::Part::Patch { .. }
+                        | crate::types::message::Part::Agent { .. }
+                        | crate::types::message::Part::Retry { .. }
+                        | crate::types::message::Part::Compaction { .. }
+                        | crate::types::message::Part::Subtask { .. } => None,
                     })
                     .collect::<Vec<_>>()
                     .join("")

@@ -5,8 +5,6 @@ use futures_util::StreamExt;
 use opencode_client::api::OpenCodeClient;
 use opencode_client::event::sse::SseClient;
 use opencode_client::server::{ServerConfig, ServerGuard};
-use opencode_client::types::event::Event;
-use opencode_client::types::message::Part;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,29 +36,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     println!("PASS: промпт отправлен");
 
-    // 6. Копим текст по part.id.
+    // 6. Копим текст по part.id только из ассистентских сообщений.
     let mut parts: HashMap<String, String> = HashMap::new();
+    let mut assistant_messages: std::collections::HashSet<String> = Default::default();
     let deadline = std::time::Instant::now() + Duration::from_secs(25);
     let mut idle_for_this = false;
 
     while std::time::Instant::now() < deadline {
         match stream.next().await {
-            Some(Ok(ev)) => match &ev.payload {
-                Event::MessagePartUpdated { properties } => {
-                    if let Part::Text { id, text, ignored, .. } = &properties.part {
-                        if *ignored != Some(true) {
-                            parts.insert(id.clone(), text.clone());
-                        }
-                    }
+            Some(Ok(ev)) => {
+                if let Some(mid) = ev.payload.assistant_message_id() {
+                    assistant_messages.insert(mid.to_string());
                 }
-                Event::SessionIdle { properties } => {
-                    if properties.sessionID == session_id {
+                if let Some((mid, id, text)) = ev.payload.text_part() {
+                    if assistant_messages.contains(mid) {
+                        parts.insert(id.to_string(), text);
+                    }
+                } else if let Some(sid) = ev.payload.idle_session_id() {
+                    if sid == session_id {
                         idle_for_this = true;
                         break;
                     }
                 }
-                _ => {}
-            },
+            }
             Some(Err(err)) => {
                 eprintln!("sse err: {err}");
             }

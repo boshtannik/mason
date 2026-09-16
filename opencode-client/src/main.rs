@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use std::cell::RefCell;
-
 use futures_util::StreamExt;
 use tokio::sync::Mutex;
 
@@ -107,10 +106,18 @@ async fn run_gui(
     let bridge_pinned = unsafe { QObjectPinned::new(&bridge) };
     bridge_pinned.borrow_mut().set_session_status_rs("idle".to_string());
 
-    // Фоновый SSE-воркер: глотает события и логирует.
-    // Push в QML-мост из этого потока небезопасно (Qt требует главный поток);
-    // позже — через QMetaObject::invokeMethod на объект.
+    // Очереди: воркер пишет/читает без QML (Send + 'static), QML-мост работает
+    // с теми же Arc на главном потоке.
+    let (pending_queue, prompts_queue) = bridge_pinned.borrow().queues();
+    let push_msg = pending_queue.clone();
+    drop(push_msg);
+
+    // Фоновый воркер: (1) SSE-события → QML-мост, (2) промпты из QML → сервер.
+    let worker_pending = pending_queue.clone();
+    let worker_prompts = prompts_queue.clone();
     tokio::spawn(async move {
+        let client = api::OpenCodeClient::new(base.clone(), auth.clone());
+
         let sse = event::sse::SseClient::new(base, auth);
         log::info!("подключаюсь к /global/event...");
         let mut stream = match sse.stream().await {
@@ -120,17 +127,81 @@ async fn run_gui(
                 return;
             }
         };
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(ev) => {
-                    let mut st = dispatcher.lock().await;
-                    let changed = event::dispatcher::dispatch(&ev.payload, &mut st).await;
-                    drop(st);
-                    if changed {
-                        log::info!("event: {:?}", ev.payload);
+
+        // Копим текст ответов по part.id (см. example full_cycle).
+        let mut parts: std::collections::HashMap<String, String> = Default::default();
+        let mut current_session: Option<String> = None;
+        // id ассистентских сообщений — только их текстовые части идят в ответ.
+        let mut assistant_messages: std::collections::HashSet<String> = Default::default();
+
+        // Цикл: слушаем SSE и параллельно опрашиваем мост на новые промпты.
+        loop {
+            tokio::select! {
+                item = stream.next() => {
+                    match item {
+                        Some(Ok(ev)) => {
+                            let mut st = dispatcher.lock().await;
+                            let changed = event::dispatcher::dispatch(&ev.payload, &mut st).await;
+                            drop(st);
+                            if let Some(mid) = ev.payload.assistant_message_id() {
+                                assistant_messages.insert(mid.to_string());
+                            }
+                            if let Some((mid, id, text)) = ev.payload.text_part() {
+                                if assistant_messages.contains(mid) {
+                                    parts.insert(id.to_string(), text);
+                                }
+                            } else if let Some(session_id) = ev.payload.idle_session_id() {
+                                if current_session.as_deref() == Some(session_id) {
+                                    // Собрать накопленный ответ и отдать в QML.
+                                    let mut ans: Vec<&String> = parts.values().collect();
+                                    ans.sort();
+                                    let text: String = ans.iter().map(|s| s.as_str()).collect();
+                                    if !text.trim().is_empty() {
+                                        log::info!("push answer: {:?}", text);
+                                        if let Ok(mut q) = worker_pending.lock() {
+                                            q.push(text);
+                                        }
+                                    }
+                                    parts.clear();
+                                    current_session = None;
+                                }
+                            }
+                            let _ = changed;
+                        }
+                        Some(Err(e)) => log::error!("sse error: {e}"),
+                        None => { log::info!("SSE закрылся"); return; }
                     }
                 }
-                Err(e) => log::error!("sse error: {e}"),
+                _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+                    for prompt in worker_prompts.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
+                        log::info!("QML промпт: {prompt}");
+                        // Создаём сессию если ещё нет.
+                        if current_session.is_none() {
+                            match client.create_session().await {
+                                Ok(sess) => {
+                                    if let Some(id) = sess["id"].as_str() {
+                                        current_session = Some(id.to_string());
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("create_session: {e}");
+                                    if let Ok(mut q) = worker_pending.lock() {
+                                        q.push(format!("[ошибка сессии] {e}"));
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                        if let Some(sid) = current_session.clone() {
+                            if let Err(e) = client.prompt_async(&sid, &prompt).await {
+                                log::error!("prompt_async: {e}");
+                                if let Ok(mut q) = worker_pending.lock() {
+                                    q.push(format!("[ошибка промпта] {e}"));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     });

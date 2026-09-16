@@ -86,6 +86,7 @@ pub enum Part {
     #[serde(rename = "text")]
     Text {
         id: String,
+        messageID: String,
         text: String,
         synthetic: Option<bool>,
         ignored: Option<bool>,

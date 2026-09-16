@@ -6,6 +6,7 @@ use crate::state::permission::PermissionQueue;
 use crate::state::session::SessionFsm;
 use crate::state::tool::ToolStore;
 use crate::types::event::Event;
+use crate::types::permission::Permission;
 
 /// Применяет событие к состоянию. Возвращает bool — «состояние изменилось» (перерисовать UI).
 pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
@@ -23,12 +24,43 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
             }
             true
         }
-        Event::PermissionUpdated { properties: perm } => {
-            state.permissions.push(perm.clone());
+        Event::PermissionV2Asked { properties } => {
+            let perm = Permission {
+                id: properties.id.clone(),
+                sessionID: properties.sessionID.clone(),
+                action: properties.action.clone(),
+                resources: properties.resources.clone(),
+                save: properties.save.clone(),
+                metadata: properties.metadata.clone(),
+                source: properties.source.clone(),
+            };
+            state.permissions.push(perm);
             true
         }
-        Event::PermissionReplied { properties } => {
-            state.permissions.pop(&properties.permissionID);
+        Event::PermissionAsked { properties } => {
+            // Legacy permission.asked → та же модель Permission.
+            let perm = Permission {
+                id: properties.id.clone(),
+                sessionID: properties.sessionID.clone(),
+                action: properties.permission.clone(),
+                resources: properties.patterns.clone(),
+                save: Some(properties.always.clone()),
+                metadata: Some(properties.metadata.clone()),
+                source: properties.tool.as_ref().map(|t| crate::types::event::PermissionV2Source {
+                    kind: "tool".to_string(),
+                    messageID: t.messageID.clone(),
+                    callID: t.callID.clone(),
+                }),
+            };
+            state.permissions.push(perm);
+            true
+        }
+        Event::PermissionV2Replied { properties: p } => {
+            state.permissions.pop(&p.requestID);
+            true
+        }
+        Event::PermissionReplied { properties: p } => {
+            state.permissions.pop(&p.requestID);
             true
         }
         Event::MessagePartUpdated { properties } => {
@@ -46,7 +78,87 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
             state.sessions.remove(&properties.info.id);
             true
         }
-        _ => false,
+        // Прочие события пока не меняют состояние — перечислены исчерпывающе.
+        Event::ModelsDevRefreshed { .. }
+        | Event::IntegrationUpdated { .. }
+        | Event::IntegrationConnectionUpdated { .. }
+        | Event::CatalogUpdated { .. }
+        | Event::SessionCompacted { .. }
+        | Event::SessionDiff { .. }
+        | Event::SessionError { .. }
+        | Event::MessageUpdated { .. }
+        | Event::MessageRemoved { .. }
+        | Event::MessagePartRemoved { .. }
+        | Event::MessagePartDelta { .. }
+        | Event::SessionNextAgentSwitched { .. }
+        | Event::SessionNextModelSwitched { .. }
+        | Event::SessionNextMoved { .. }
+        | Event::SessionNextPrompted { .. }
+        | Event::SessionNextPromptAdmitted { .. }
+        | Event::SessionNextContextUpdated { .. }
+        | Event::SessionNextSynthetic { .. }
+        | Event::SessionNextShellStarted { .. }
+        | Event::SessionNextShellEnded { .. }
+        | Event::SessionNextStepStarted { .. }
+        | Event::SessionNextStepEnded { .. }
+        | Event::SessionNextStepFailed { .. }
+        | Event::SessionNextTextStarted { .. }
+        | Event::SessionNextTextDelta { .. }
+        | Event::SessionNextTextEnded { .. }
+        | Event::SessionNextReasoningStarted { .. }
+        | Event::SessionNextReasoningDelta { .. }
+        | Event::SessionNextReasoningEnded { .. }
+        | Event::SessionNextToolInputStarted { .. }
+        | Event::SessionNextToolInputDelta { .. }
+        | Event::SessionNextToolInputEnded { .. }
+        | Event::SessionNextToolCalled { .. }
+        | Event::SessionNextToolProgress { .. }
+        | Event::SessionNextToolSuccess { .. }
+        | Event::SessionNextToolFailed { .. }
+        | Event::SessionNextRetried { .. }
+        | Event::SessionNextCompactionStarted { .. }
+        | Event::SessionNextCompactionDelta { .. }
+        | Event::SessionNextCompactionEnded { .. }
+        | Event::SessionNextRevertStaged { .. }
+        | Event::SessionNextRevertCleared { .. }
+        | Event::SessionNextRevertCommitted { .. }
+        | Event::InstallationUpdated { .. }
+        | Event::InstallationUpdateAvailable { .. }
+        | Event::FileEdited { .. }
+        | Event::ReferenceUpdated { .. }
+        | Event::PluginAdded { .. }
+        | Event::ProjectDirectoriesUpdated { .. }
+        | Event::FileWatcherUpdated { .. }
+        | Event::PtyCreated { .. }
+        | Event::PtyUpdated { .. }
+        | Event::PtyExited { .. }
+        | Event::PtyDeleted { .. }
+        | Event::QuestionV2Asked { .. }
+        | Event::QuestionV2Replied { .. }
+        | Event::QuestionV2Rejected { .. }
+        | Event::QuestionAsked { .. }
+        | Event::QuestionReplied { .. }
+        | Event::QuestionRejected { .. }
+        | Event::TodoUpdated { .. }
+        | Event::LspUpdated { .. }
+        | Event::TuiPromptAppend { .. }
+        | Event::TuiCommandExecute { .. }
+        | Event::TuiToastShow { .. }
+        | Event::TuiSessionSelect { .. }
+        | Event::McpToolsChanged { .. }
+        | Event::McpBrowserOpenFailed { .. }
+        | Event::CommandExecuted { .. }
+        | Event::ProjectUpdated { .. }
+        | Event::VcsBranchUpdated { .. }
+        | Event::WorkspaceReady { .. }
+        | Event::WorkspaceFailed { .. }
+        | Event::WorkspaceStatus { .. }
+        | Event::WorktreeReady { .. }
+        | Event::WorktreeFailed { .. }
+        | Event::ServerConnected { .. }
+        | Event::GlobalDisposed { .. }
+        | Event::ServerInstanceDisposed { .. }
+        | Event::Sync { .. } => false,
     }
 }
 

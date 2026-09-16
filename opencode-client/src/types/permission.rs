@@ -1,26 +1,16 @@
 use serde::Deserialize;
 
+use super::event::PermissionV2Source;
+
+/// Запрос разрешения, ожидающий ответа пользователя.
+/// Поля соответствуют официальному событию permission.v2.asked (SDK 1.18.31).
 #[derive(Debug, Clone, Deserialize)]
 pub struct Permission {
     pub id: String,
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub pattern: Option<serde_json::Value>,
     pub sessionID: String,
-    pub messageID: String,
-    pub callID: Option<String>,
-    pub title: String,
-    pub metadata: serde_json::Value,
-    pub time: PermissionTime,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PermissionTime {
-    pub created: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PermissionResponse {
-    pub response: String,
-    pub remember: Option<bool>,
+    pub action: String,
+    pub resources: Vec<String>,
+    pub save: Option<Vec<String>>,
+    pub metadata: Option<serde_json::Value>,
+    pub source: Option<PermissionV2Source>,
 }
