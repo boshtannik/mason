@@ -1,5 +1,6 @@
 mod api;
 mod event;
+mod server;
 mod state;
 mod types;
 
@@ -12,6 +13,16 @@ use tokio::sync::Mutex;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::try_init().ok();
     log::info!("opencode-client starting");
+
+    // Сервер — часть приложения: поднять в момент старта (RAII).
+    let server_guard = match server::ServerGuard::start(server::ServerConfig::default()).await {
+        Ok(g) => g,
+        Err(e) => {
+            log::error!("не удалось поднять opencode serve: {e}");
+            return Ok(());
+        }
+    };
+    log::info!("opencode serve поднят: {}", server_guard.base_url());
 
     // Через env: OPENCODE_SERVER_URL (default http://127.0.0.1:4096)
     let base = std::env::var("OPENCODE_SERVER_URL")
