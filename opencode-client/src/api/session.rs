@@ -1,0 +1,61 @@
+use crate::api::OpenCodeClient;
+
+#[derive(serde::Serialize)]
+pub struct PromptBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub messageID: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    pub parts: Vec<PromptPart>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "type")]
+pub enum PromptPart {
+    #[serde(rename = "text")]
+    Text { text: String },
+}
+
+impl OpenCodeClient {
+    /// POST /session -> создать новую сессию.
+    pub async fn create_session(&self) -> Result<serde_json::Value, String> {
+        let url = format!("{}/session", self.base);
+        let resp = self
+            .authed(self.http.post(&url))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    /// POST /session/{id}/prompt_async — отправить промпт, не ждать ответа (SSE принесёт результат).
+    pub async fn prompt_async(&self, session_id: &str, text: &str) -> Result<(), String> {
+        let url = format!("{}/session/{session_id}/prompt_async", self.base);
+        let body = PromptBody {
+            messageID: None,
+            model: None,
+            agent: None,
+            parts: vec![PromptPart::Text { text: text.to_string() }],
+        };
+        let resp = self
+            .authed(self.http.post(&url))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("prompt_async status: {}", resp.status()));
+        }
+        Ok(())
+    }
+
+    /// POST /session/{id}/abort — прервать выполнение.
+    pub async fn abort(&self, session_id: &str) -> Result<bool, String> {
+        let url = format!("{}/session/{session_id}/abort", self.base);
+        let resp = self.authed(self.http.post(&url)).send().await.map_err(|e| e.to_string())?;
+        Ok(resp.status().is_success())
+    }
+}
