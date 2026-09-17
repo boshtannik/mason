@@ -1,23 +1,8 @@
-.PHONY: build build-arm build-arm-release check check-all deploy deploy-release
+.PHONY: mbuild clean
 
-# Сборка под aarch64 (телефон)
-build-arm:
-	scripts/build.sh -a
+# Сборка RPM под Sailfish (Docker sailo-rs + mb2).
+mbuild:
+	sg docker -c "./mbuild.sh"
 
-build-arm-release:
-	scripts/build.sh -ar
-
-# Все серверные проверки (guard_smoke + full_cycle)
-check:
-	scripts/check.sh
-
-# Полный набор проверок (включая голос и аудио)
-check-all:
-	scripts/check.sh --voice --audio
-
-# Деплой debug-бинаря на телефон
-deploy:
-	scripts/deploy.sh
-
-deploy-release:
-	scripts/deploy.sh -r
+clean:
+	rm -rf opencode-client/target RPMS

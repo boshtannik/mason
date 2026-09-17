@@ -47,13 +47,8 @@ impl ServerGuard {
     /// Запускает `opencode serve`, читает из лога назначенный порт,
     /// ждёт health-ответа и возвращает готовый guard (RAII).
     pub async fn start(cfg: ServerConfig) -> Result<Self, String> {
-        let bin = cfg.bin.unwrap_or_else(|| {
-            std::ffi::OsString::from(
-                std::env::var("OPENCODE_BIN")
-                    .unwrap_or_else(|_| "opencode".to_string()),
-            )
-            .into()
-        });
+        let bin = resolve_bin(cfg.bin);
+        info!("PATH={:?}, opencode bin={:?}", std::env::var("PATH"), bin);
 
         let mut cmd = Command::new(&bin);
         cmd.arg("serve")
@@ -176,6 +171,33 @@ impl Drop for ServerGuard {
             }
         }
     }
+}
+
+/// Ищет бинарь opencode: явный путь → OPENCODE_BIN → стандартные места → PATH.
+fn resolve_bin(explicit: Option<std::path::PathBuf>) -> std::path::PathBuf {
+    if let Some(b) = explicit {
+        return b;
+    }
+    if let Ok(p) = std::env::var("OPENCODE_BIN") {
+        return p.into();
+    }
+    for cand in [
+        "/usr/local/bin/opencode",
+        "/usr/bin/opencode",
+        "/opt/opencode/bin/opencode",
+    ] {
+        if std::path::Path::new(cand).exists() {
+            return cand.into();
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    if !home.is_empty() {
+        let p = format!("{home}/.opencode/bin/opencode");
+        if std::path::Path::new(&p).exists() {
+            return p.into();
+        }
+    }
+    "opencode".into()
 }
 
 fn read_lines<R: std::io::Read>(reader: R, tx: mpsc::Sender<String>) {

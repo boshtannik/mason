@@ -2,7 +2,11 @@
 name = "opencode-client"
 version = "0.1.0"
 edition = "2021"
-description = "Sailfish OS client for opencode server (Rust + QML)"
+description = "Native opencode client for Sailfish OS (Rust + QML)"
+
+[[bin]]
+name = "harbour-opencode"
+path = "src/main.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -14,14 +18,16 @@ bytes = "1"
 thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
-cpal = "0.15"
-hound = "3"
-qmetaobject = { version = "0.2", optional = true }
-cstr = "0.2"
+
+qmetaobject = { path = "vendor/qmetaobject-sfos-rs/qmetaobject" }
+sailors = { path = "vendor/sailors" }
+
+cpal = { version = "0.15", optional = true }
+hound = { version = "3", optional = true }
 
 [features]
-default = ["gui"]
-gui = ["qmetaobject"]
+default = []
+voice = ["dep:cpal", "dep:hound"]
 
 [profile.release]
 opt-level = "s"

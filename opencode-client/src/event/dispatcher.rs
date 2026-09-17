@@ -13,7 +13,7 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
     match event {
         Event::SessionStatus { properties } => {
             let id = properties.sessionID.clone();
-            let mut fsm = state.sessions.entry(id.clone()).or_insert_with(SessionFsm::default);
+            let fsm = state.sessions.entry(id.clone()).or_insert_with(SessionFsm::default);
             fsm.apply(properties.status.clone());
             let _ = id;
             true
@@ -155,7 +155,7 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
         | Event::WorkspaceStatus { .. }
         | Event::WorktreeReady { .. }
         | Event::WorktreeFailed { .. }
-        | Event::ServerConnected { .. }
+        | Event::ServerConnected { .. } | Event::ServerHeartbeat { .. }
         | Event::GlobalDisposed { .. }
         | Event::ServerInstanceDisposed { .. }
         | Event::Sync { .. } => false,

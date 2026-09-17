@@ -275,6 +275,9 @@ pub enum Event {
     #[serde(rename = "server.connected")]
     ServerConnected { properties: serde_json::Value },
 
+    #[serde(rename = "server.heartbeat")]
+    ServerHeartbeat { properties: serde_json::Value },
+
     #[serde(rename = "global.disposed")]
     GlobalDisposed { properties: serde_json::Value },
 
@@ -1202,7 +1205,7 @@ impl Event {
             | Event::WorkspaceStatus { .. }
             | Event::WorktreeReady { .. }
             | Event::WorktreeFailed { .. }
-            | Event::ServerConnected { .. }
+            | Event::ServerConnected { .. } | Event::ServerHeartbeat { .. }
             | Event::GlobalDisposed { .. }
             | Event::ServerInstanceDisposed { .. }
             | Event::Sync { .. } => None,
@@ -1301,7 +1304,7 @@ impl Event {
             | Event::WorkspaceStatus { .. }
             | Event::WorktreeReady { .. }
             | Event::WorktreeFailed { .. }
-            | Event::ServerConnected { .. }
+            | Event::ServerConnected { .. } | Event::ServerHeartbeat { .. }
             | Event::GlobalDisposed { .. }
             | Event::ServerInstanceDisposed { .. }
             | Event::Sync { .. } => None,
@@ -1397,7 +1400,7 @@ impl Event {
             | Event::WorkspaceStatus { .. }
             | Event::WorktreeReady { .. }
             | Event::WorktreeFailed { .. }
-            | Event::ServerConnected { .. }
+            | Event::ServerConnected { .. } | Event::ServerHeartbeat { .. }
             | Event::GlobalDisposed { .. }
             | Event::ServerInstanceDisposed { .. }
             | Event::Sync { .. } => None,

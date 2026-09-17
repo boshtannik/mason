@@ -9,3 +9,14 @@ Cargo.lock
 
 # Обсидиан кэш (если кто-то использует трэш/темп)
 .vault-trash/
+
+# Артефакты сборки RPM
+*.rpm
+.resolve.out
+
+# Тяжёлые/экспериментальные каталоги (не тащим в git)
+/vendor/
+/sfos-sysroot/
+/spike/
+/docker/
+/templates/

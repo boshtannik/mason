@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 pub mod api;
+#[cfg(feature = "voice")]
 pub mod audio;
-#[cfg(feature = "gui")]
 pub mod bridge;
 pub mod event;
 pub mod server;
