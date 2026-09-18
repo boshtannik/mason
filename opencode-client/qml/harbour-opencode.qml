@@ -1,5 +1,9 @@
 import QtQuick 2.6
 import Sailfish.Silica 1.0
+import QtMultimedia 5.4
+import Nemo.Notifications 1.0
+import Nemo.KeepAlive 1.2
+import Nemo.Configuration 1.0
 import "pages"
 
 ApplicationWindow {
@@ -22,8 +26,40 @@ ApplicationWindow {
     property bool sttModelReady: false
     property bool ttsModelReady: false
 
+    // Для детекта перехода "агент занят → свободен".
+    property bool wasBusy: false
+
+    // Системные звуки для уведомлений (сканирует воркер, `[{name,path}]`).
+    property var sounds: []
+    // Выбранный звук уведомления (сохраняется в настройках DConf).
+    property string dingSound: dingSetting.value
+
     // Запрос переключить страницу карусели (0..3).
     signal requestPage(int index)
+
+    ConfigurationValue {
+        id: dingSetting
+        key: "/apps/harbour-opencode/dingSound"
+    }
+
+    // Держим процесс живым, пока агент работает (иначе Sailfish усыпит его в фоне).
+    KeepAlive {
+        id: agentKeepAlive
+        enabled: app.statusText === "busy"
+    }
+
+    // "Дзинь" на переднем плане (в фоне играет система по уведомлению).
+    SoundEffect {
+        id: ding
+        source: app.dingSound
+    }
+
+    Notification {
+        id: notify
+        appName: "opencode"
+        urgency: Notification.Normal
+        expireTimeout: 6000
+    }
 
     Timer {
         id: pollTimer
@@ -37,6 +73,12 @@ ApplicationWindow {
         var st = bridge.status_text()
         if (st !== undefined && st !== "")
             app.statusText = st
+        if (app.statusText === "busy") {
+            app.wasBusy = true
+        } else if (app.wasBusy) {
+            app.wasBusy = false
+            app.notifyAgentFinished()
+        }
         var msgs = bridge.drain_messages()
         if (msgs !== "" && msgs !== undefined) {
             var lines = msgs.split("\n")
@@ -69,6 +111,19 @@ ApplicationWindow {
                 app.models = JSON.parse(md)
             } catch (e) {
                 console.log("models parse error: " + e)
+            }
+        }
+        if (app.sounds.length === 0) {
+            var snd = bridge.sounds_json()
+            if (snd !== "" && snd !== undefined) {
+                try {
+                    app.sounds = JSON.parse(snd)
+                    if (app.sounds.length > 0
+                        && (dingSetting.value === undefined || dingSetting.value === ""))
+                        dingSetting.value = app.sounds[0].path
+                } catch (e) {
+                    console.log("sounds parse error: " + e)
+                }
             }
         }
         var cid = bridge.current_session_id()
@@ -139,6 +194,52 @@ ApplicationWindow {
     function summarizeSession(id) { bridge.summarize_session(id) }
     function abortSession(id) { bridge.abort_session(id) }
     function setModel(id, provider, model) { bridge.set_model(id, provider, model) }
+
+    function playDing() {
+        ding.play()
+    }
+
+    function setDingSound(path) {
+        app.dingSound = path
+        dingSetting.value = path
+        dingSetting.sync()
+    }
+
+    function dingSoundName() {
+        for (var i = 0; i < app.sounds.length; i++)
+            if (app.sounds[i].path === app.dingSound)
+                return app.sounds[i].name
+        return app.dingSound
+    }
+
+    function publishNotification(summary, body) {
+        notify.summary = summary
+        notify.body = body
+        notify.previewSummary = summary
+        notify.previewBody = body
+        notify.sound = app.dingSound
+        notify.publish()
+    }
+
+    function notifyAgentFinished() {
+        if (!app.soundOnFinish)
+            return
+        if (Qt.application.state === Qt.ApplicationActive) {
+            app.playDing()
+        } else {
+            app.publishNotification(qsTr("opencode"), qsTr("Агент завершил работу"))
+        }
+    }
+
+    function notifyPermission() {
+        if (!app.soundOnPermission)
+            return
+        if (Qt.application.state === Qt.ApplicationActive) {
+            app.playDing()
+        } else {
+            app.publishNotification(qsTr("opencode"), qsTr("Агент запрашивает разрешение"))
+        }
+    }
     function stopAgent() {
         if (app.currentSessionId !== "")
             app.abortSession(app.currentSessionId)

@@ -44,6 +44,9 @@ pub struct AppBridge {
     /// Плоский список моделей (JSON), пишет воркер, читает QML.
     #[allow(dead_code)]
     models_shared: Arc<Mutex<String>>,
+    /// Список доступных системных звуков (JSON `[{name,path}]`), пишет воркер, читает QML.
+    #[allow(dead_code)]
+    sounds_shared: Arc<Mutex<String>>,
 
     /// QML: забрать и очистить накопленные сообщения (polling).
     drain_messages: qt_method!(fn drain_messages(&self) -> QString {
@@ -159,6 +162,11 @@ pub struct AppBridge {
         let v = self.models_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
+    /// QML: список доступных системных звуков как JSON (read-only).
+    sounds_json: qt_method!(fn sounds_json(&self) -> QString {
+        let v = self.sounds_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
     /// QML: переключить модель сессии.
     set_model: qt_method!(fn set_model(&self, id: QString, provider: QString, model: QString) {
         let id = id.to_string();
@@ -249,6 +257,11 @@ impl AppBridge {
     /// Хэндл списка моделей для воркера.
     pub fn models_handle(&self) -> Arc<Mutex<String>> {
         self.models_shared.clone()
+    }
+
+    /// Хэндл списка системных звуков для воркера.
+    pub fn sounds_handle(&self) -> Arc<Mutex<String>> {
+        self.sounds_shared.clone()
     }
 
     /// Положить JSON-команду в очередь для воркера.

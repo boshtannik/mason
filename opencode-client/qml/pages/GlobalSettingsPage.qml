@@ -72,21 +72,52 @@ Item {
             }
 
             TextSwitch {
-                text: qsTr("Finish sound")
+                text: qsTr("Send immediately")
+                checked: appWindow.sendImmediately
+                onCheckedChanged: appWindow.sendImmediately = checked
+            }
+
+            SectionHeader { text: qsTr("Notifications") }
+
+            TextSwitch {
+                text: qsTr("Sound when agent finishes (ding)")
                 checked: appWindow.soundOnFinish
                 onCheckedChanged: appWindow.soundOnFinish = checked
             }
 
             TextSwitch {
-                text: qsTr("Permission sound")
+                text: qsTr("Sound on permission request")
                 checked: appWindow.soundOnPermission
                 onCheckedChanged: appWindow.soundOnPermission = checked
             }
 
-            TextSwitch {
-                text: qsTr("Send immediately")
-                checked: appWindow.sendImmediately
-                onCheckedChanged: appWindow.sendImmediately = checked
+            BackgroundItem {
+                width: parent.width
+                contentHeight: Theme.itemSizeSmall
+                Label {
+                    x: Theme.horizontalPageMargin
+                    width: parent.width - 2 * Theme.horizontalPageMargin
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Sound") + ": " + globalSettingsPage.appWindow.dingSoundName()
+                    truncationMode: TruncationMode.Fade
+                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
+                }
+                onClicked: globalSettingsPage.appWindow.pageStack.push(
+                               soundPickerComponent,
+                               { appWindow: globalSettingsPage.appWindow })
+            }
+
+            BackgroundItem {
+                width: parent.width
+                contentHeight: Theme.itemSizeSmall
+                Label {
+                    x: Theme.horizontalPageMargin
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Test notification")
+                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
+                }
+                onClicked: appWindow.publishNotification(qsTr("opencode"),
+                                                         qsTr("Тестовое уведомление"))
             }
 
             SectionHeader { text: qsTr("Interface") }
@@ -120,5 +151,45 @@ Item {
         }
 
         VerticalScrollDecorator {}
+    }
+
+    Component {
+        id: soundPickerComponent
+        Page {
+            id: soundPickerPage
+            property var appWindow
+
+            SilicaListView {
+                anchors.fill: parent
+                model: soundPickerPage.appWindow !== undefined
+                       ? soundPickerPage.appWindow.sounds
+                       : []
+                header: PageHeader { title: qsTr("Звук уведомления") }
+                delegate: ListItem {
+                    contentHeight: Theme.itemSizeSmall
+                    onClicked: {
+                        soundPickerPage.appWindow.setDingSound(modelData.path)
+                        soundPickerPage.appWindow.playDing()
+                    }
+                    Label {
+                        x: Theme.horizontalPageMargin
+                        width: parent.width - 2 * Theme.horizontalPageMargin
+                                 - Theme.itemSizeSmall
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.name
+                        truncationMode: TruncationMode.Fade
+                        color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
+                    }
+                    Label {
+                        anchors.right: parent.right
+                        anchors.rightMargin: Theme.horizontalPageMargin
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.path === soundPickerPage.appWindow.dingSound ? "✓" : ""
+                        color: Theme.highlightColor
+                    }
+                }
+                VerticalScrollDecorator {}
+            }
+        }
     }
 }

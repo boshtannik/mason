@@ -76,6 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let todos = bridge_pinned.borrow().todo_handle();
     let models = bridge_pinned.borrow().models_handle();
+    let sounds = bridge_pinned.borrow().sounds_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
@@ -99,6 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_nav = nav.clone();
     let worker_todos = todos.clone();
     let worker_models = models.clone();
+    let worker_sounds = sounds.clone();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -132,6 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         worker_nav,
                         worker_todos,
                         worker_models,
+                        worker_sounds,
                     )
                     .await
                 }
@@ -172,6 +175,7 @@ async fn run_worker(
     nav: Arc<std::sync::Mutex<i32>>,
     todos: Arc<std::sync::Mutex<String>>,
     models: Arc<std::sync::Mutex<String>>,
+    sounds: Arc<std::sync::Mutex<String>>,
 ) {
     loop {
         match run_stream(
@@ -187,6 +191,7 @@ async fn run_worker(
             nav.clone(),
             todos.clone(),
             models.clone(),
+            sounds.clone(),
         )
         .await
         {
@@ -213,6 +218,7 @@ async fn run_stream(
     nav: Arc<std::sync::Mutex<i32>>,
     todos: Arc<std::sync::Mutex<String>>,
     models: Arc<std::sync::Mutex<String>>,
+    sounds: Arc<std::sync::Mutex<String>>,
 ) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
 
@@ -233,6 +239,7 @@ async fn run_stream(
     // Сразу показываем список ранее начатых сессий и доступные модели.
     refresh_sessions(&client, &sessions).await;
     refresh_models(&client, &models).await;
+    refresh_sounds(&sounds);
 
     // Цикл: слушаем SSE и параллельно опрашиваем мост на новые промпты.
     loop {
@@ -603,6 +610,62 @@ async fn refresh_models(
     let json = serde_json::Value::Array(flat).to_string();
     if let Ok(mut g) = models.lock() {
         *g = json;
+    }
+}
+
+/// Просканировать системные директории звуков и собрать JSON `[{name,path}]`
+/// для QML-выбора (SoundEffect играет только WAV).
+fn refresh_sounds(sounds: &Arc<std::sync::Mutex<String>>) {
+    let dirs = [
+        "/usr/share/sounds/jolla-ambient/stereo",
+        "/usr/share/sounds/jolla-ringtones/stereo",
+        "/usr/share/sounds/freedesktop/stereo",
+    ];
+    let mut items: Vec<(String, String)> = Vec::new();
+    for dir in dirs {
+        let mut in_dir: Vec<(String, String)> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                if !e.path().is_file() {
+                    continue;
+                }
+                let p = e.path();
+                let ext = p
+                    .extension()
+                    .map(|x| x.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                if ext != "wav" {
+                    continue;
+                }
+                let disp = p.display().to_string();
+                let fname = p
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let pretty = fname
+                    .trim_end_matches(".wav")
+                    .replace('_', " ")
+                    .replace('-', " ");
+                let pretty = pretty
+                    .chars()
+                    .enumerate()
+                    .map(|(i, c)| {
+                        if i == 0 { c.to_uppercase().collect::<String>() } else { c.to_string() }
+                    })
+                    .collect::<String>();
+                in_dir.push((pretty, format!("file://{disp}")));
+            }
+        }
+        in_dir.sort_by(|a, b| a.0.cmp(&b.0));
+        items.extend(in_dir);
+    }
+    let arr: Vec<serde_json::Value> = items
+        .iter()
+        .map(|(n, p)| serde_json::json!({ "name": n, "path": p }))
+        .collect();
+    log::info!("найдено системных звуков: {}", arr.len());
+    if let Ok(mut g) = sounds.lock() {
+        *g = serde_json::Value::Array(arr).to_string();
     }
 }
 
