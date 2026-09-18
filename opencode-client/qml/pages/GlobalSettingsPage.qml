@@ -105,6 +105,15 @@ Item {
                                { appWindow: globalSettingsPage.appWindow })
             }
 
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Tap — download / select; long press — remove / cancel.")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+            }
+
             SectionHeader { text: qsTr("Speakers") }
 
             ComboBox {
@@ -253,20 +262,31 @@ Item {
             property var list: sttPickerPage.appWindow !== undefined
                                ? sttPickerPage.appWindow.voiceModelsFor("stt_whisper") : []
 
+            function pct(m) {
+                var size = parseInt(m.size)
+                var done = parseInt(m.done || 0)
+                if (!size) return ""
+                return Math.min(99, Math.round(done / size * 100)) + "%"
+            }
             function sub(m) {
                 var s = m.lang_id + " · " + sttPickerPage.appWindow.humanSize(m.size)
                 if (m.downloaded)
                     s += " ✓"
+                if (m.state === "downloading")
+                    s += " · " + sttPickerPage.pct(m)
                 return s
             }
             function rightText(m) {
+                if (m.state === "downloading")
+                    return qsTr("cancel")
                 if (m.model_id === sttPickerPage.appWindow.chosenStt)
                     return qsTr("selected")
                 if (m.downloaded)
                     return qsTr("select")
-                if (m.state === "downloading")
-                    return "…"
                 return qsTr("download")
+            }
+            function menuText(m) {
+                return m.state === "downloading" ? qsTr("Cancel download") : qsTr("Remove model")
             }
 
             SilicaListView {
@@ -276,13 +296,29 @@ Item {
                 delegate: ListItem {
                     contentHeight: Theme.itemSizeMedium
                     onClicked: {
-                        if (modelData.downloaded) {
+                        if (modelData.state === "downloading") {
+                            sttPickerPage.appWindow.voiceCmd(
+                                "voice_download_cancel", modelData.model_id)
+                        } else if (modelData.downloaded) {
                             sttPickerPage.appWindow.voiceCmd(
                                 "voice_select_stt", modelData.model_id)
                             sttPickerPage.appWindow.pageStack.pop()
-                        } else if (modelData.state !== "downloading") {
+                        } else {
                             sttPickerPage.appWindow.voiceCmd(
                                 "voice_download", modelData.model_id)
+                        }
+                    }
+                    menu: ContextMenu {
+                        MenuItem {
+                            text: sttPickerPage.menuText(modelData)
+                            onClicked: {
+                                if (modelData.state === "downloading")
+                                    sttPickerPage.appWindow.voiceCmd(
+                                        "voice_download_cancel", modelData.model_id)
+                                else
+                                    sttPickerPage.appWindow.voiceCmd(
+                                        "voice_delete", modelData.model_id)
+                            }
                         }
                     }
                     Column {
@@ -329,20 +365,31 @@ Item {
             property var list: ttsPickerPage.appWindow !== undefined
                                ? ttsPickerPage.appWindow.voiceModelsFor("tts_piper") : []
 
+            function pct(m) {
+                var size = parseInt(m.size)
+                var done = parseInt(m.done || 0)
+                if (!size) return ""
+                return Math.min(99, Math.round(done / size * 100)) + "%"
+            }
             function sub(m) {
                 var s = m.lang_id + " · " + ttsPickerPage.appWindow.humanSize(m.size)
                 if (m.downloaded)
                     s += " ✓"
+                if (m.state === "downloading")
+                    s += " · " + ttsPickerPage.pct(m)
                 return s
             }
             function rightText(m) {
+                if (m.state === "downloading")
+                    return qsTr("cancel")
                 if (m.model_id === ttsPickerPage.appWindow.chosenTts)
                     return qsTr("selected")
                 if (m.downloaded)
                     return qsTr("select")
-                if (m.state === "downloading")
-                    return "…"
                 return qsTr("download")
+            }
+            function menuText(m) {
+                return m.state === "downloading" ? qsTr("Cancel download") : qsTr("Remove model")
             }
 
             SilicaListView {
@@ -352,13 +399,29 @@ Item {
                 delegate: ListItem {
                     contentHeight: Theme.itemSizeMedium
                     onClicked: {
-                        if (modelData.downloaded) {
+                        if (modelData.state === "downloading") {
+                            ttsPickerPage.appWindow.voiceCmd(
+                                "voice_download_cancel", modelData.model_id)
+                        } else if (modelData.downloaded) {
                             ttsPickerPage.appWindow.voiceCmd(
                                 "voice_select_tts", modelData.model_id)
                             ttsPickerPage.appWindow.pageStack.pop()
-                        } else if (modelData.state !== "downloading") {
+                        } else {
                             ttsPickerPage.appWindow.voiceCmd(
                                 "voice_download", modelData.model_id)
+                        }
+                    }
+                    menu: ContextMenu {
+                        MenuItem {
+                            text: ttsPickerPage.menuText(modelData)
+                            onClicked: {
+                                if (modelData.state === "downloading")
+                                    ttsPickerPage.appWindow.voiceCmd(
+                                        "voice_download_cancel", modelData.model_id)
+                                else
+                                    ttsPickerPage.appWindow.voiceCmd(
+                                        "voice_delete", modelData.model_id)
+                            }
                         }
                     }
                     Column {

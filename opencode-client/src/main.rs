@@ -83,10 +83,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
 
-    // Важно: tokio-runtime нельзя поднимать в главном потоке — при запуске через
-    // mapplauncherd/booster (`invoker`, lipstick) он паникует («RefCell already
-    // borrowed»). Поэтому весь async-стек живёт в отдельном std-потоке, а Qt —
-    // в главном.
     let (url_tx, url_rx) = mpsc::channel::<Option<String>>();
     let env_base = std::env::var("OPENCODE_SERVER_URL").ok();
     let env_auth = std::env::var("OPENCODE_SERVER_PASSWORD").ok().map(|pw| {
@@ -95,6 +91,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (user, pw)
     });
 
+    // Асинхронный стек (SSE, HTTP, скачивание моделей) живёт в отдельном std-потоке:
+    // QML обязан оставаться в главном потоке, а tokio-рантайм — вне его.
     let worker_status = status.clone();
     let worker_sessions = sessions.clone();
     let worker_commands = commands.clone();
@@ -104,52 +102,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_models = models.clone();
     let worker_sounds = sounds.clone();
     let worker_voice = voice.clone();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("tokio runtime");
-        rt.block_on(async move {
-            let guard = server::ServerGuard::start(server::ServerConfig::default()).await;
-            let base = match &guard {
-                Ok(g) => {
-                    log::info!("opencode serve поднят: {}", g.base_url());
-                    Some(env_base.clone().unwrap_or_else(|| g.base_url().to_string()))
+    let worker_url_tx = url_tx.clone();
+    let worker_dispatcher = dispatcher.clone();
+    let worker_base = env_base.clone();
+    let worker_auth = env_auth.clone();
+    std::thread::Builder::new()
+        .name("opencode-worker".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(async move {
+                let guard = server::ServerGuard::start(server::ServerConfig::default()).await;
+                let base = match &guard {
+                    Ok(g) => {
+                        log::info!("opencode serve поднят: {}", g.base_url());
+                        Some(worker_base.unwrap_or_else(|| g.base_url().to_string()))
+                    }
+                    Err(e) => {
+                        log::error!("не удалось поднять opencode serve: {e}");
+                        worker_base
+                    }
+                };
+                let _ = worker_url_tx.send(base.clone());
+                match base {
+                    Some(base) => {
+                        run_worker(
+                            base,
+                            worker_auth,
+                            worker_dispatcher,
+                            pending,
+                            prompts,
+                            worker_status,
+                            worker_sessions,
+                            worker_commands,
+                            worker_current,
+                            worker_nav,
+                            worker_todos,
+                            worker_models,
+                            worker_sounds,
+                            worker_voice,
+                        )
+                        .await
+                    }
+                    None => set_status(&worker_status, "error"),
                 }
-                Err(e) => {
-                    log::error!("не удалось поднять opencode serve: {e}");
-                    env_base.clone()
-                }
-            };
-            let _ = url_tx.send(base.clone());
-            match base {
-                Some(base) => {
-                    run_worker(
-                        base,
-                        env_auth,
-                        dispatcher,
-                        pending,
-                        prompts,
-                        worker_status,
-                        worker_sessions,
-                        worker_commands,
-                        worker_current,
-                        worker_nav,
-                        worker_todos,
-                        worker_models,
-                        worker_sounds,
-                        worker_voice,
-                    )
-                    .await
-                }
-                None => set_status(&worker_status, "error"),
-            }
-            drop(guard);
-        });
-    });
+                drop(guard);
+            });
+        })
+        .expect("spawn worker");
 
     if url_rx.recv_timeout(SERVER_WAIT).ok().flatten().is_none() {
-        log::warn!("opencode serve не готов за {:?} — стартуем в offline", SERVER_WAIT);
+        log::warn!("serve не готов за {:?} — стартуем в offline", SERVER_WAIT);
         set_status(&status, "error");
     }
 
@@ -450,6 +455,8 @@ async fn run_stream(
                         | "voice_select_stt"
                         | "voice_select_tts"
                         | "voice_download"
+                        | "voice_download_cancel"
+                        | "voice_delete"
                         | "voice_record_start"
                         | "voice_record_stop"
                         | "voice_stt" => {

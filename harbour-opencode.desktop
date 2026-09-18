@@ -4,7 +4,6 @@ Name=OpenCode
 Comment=Native opencode client
 Icon=harbour-opencode
 Exec=harbour-opencode
-X-Nemo-Application-Type=silica-qt5
 
 [X-Sailjail]
 Sandboxing=Disabled

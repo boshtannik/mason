@@ -57,11 +57,13 @@ ApplicationWindow {
         enabled: app.statusText === "busy"
     }
 
-    // "Дзинь" на переднем плане (в фоне играет система по уведомлению).
-    SoundEffect {
-        id: ding
-        source: app.dingSound
-    }
+    // Пул "диней": SoundEffect нельзя перезапустить, пока играет, поэтому
+// на каждый вызов берём следующий свободный слот (ротация).
+    property int dingSlot: 0
+    SoundEffect { id: ding1; source: app.dingSound }
+    SoundEffect { id: ding2; source: app.dingSound }
+    SoundEffect { id: ding3; source: app.dingSound }
+    SoundEffect { id: ding4; source: app.dingSound }
 
     Notification {
         id: notify
@@ -263,7 +265,11 @@ ApplicationWindow {
     function setModel(id, provider, model) { bridge.set_model(id, provider, model) }
 
     function playDing() {
-        ding.play()
+        var slots = [ding1, ding2, ding3, ding4]
+        var slot = slots[app.dingSlot]
+        app.dingSlot = (app.dingSlot + 1) % slots.length
+        slot.source = app.dingSound
+        slot.play()
     }
 
     function setDingSound(path) {

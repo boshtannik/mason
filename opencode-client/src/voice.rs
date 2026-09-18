@@ -29,6 +29,8 @@ pub struct VoiceState {
     pub stt_model: Arc<std::sync::Mutex<String>>,
     pub tts_model: Arc<std::sync::Mutex<String>>,
     pub lang: Arc<std::sync::Mutex<String>>,
+    /// Флаг отмены текущего скачивания (ставит command, проверяет download_model).
+    pub cancel_dl: Arc<std::sync::Mutex<bool>>,
 }
 
 impl VoiceState {
@@ -164,6 +166,10 @@ pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
         dl.done = 0;
         dl.state = "downloading".to_string();
     }
+    {
+        let mut c = voice.cancel_dl.lock().unwrap();
+        *c = false;
+    }
     voice.refresh_status();
 
     let mut urls: Vec<String> = m["urls"]
@@ -241,6 +247,13 @@ pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
         };
         let mut fail = false;
         while let Some(chunk) = stream.next().await {
+            if let Ok(mut c) = voice.cancel_dl.lock() {
+                if *c {
+                    log::info!("скачивание {id} отменено пользователем");
+                    fail = true;
+                    break;
+                }
+            }
             match chunk {
                 Ok(c) => {
                     if file.write_all(&c).await.is_err() {
@@ -266,6 +279,7 @@ pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
     }
 
     {
+        let cancelled = voice.cancel_dl.lock().map(|g| *g).unwrap_or(true);
         let actual: u64 = std::fs::read_dir(&dir)
             .map(|rd| {
                 rd.flatten()
@@ -273,15 +287,22 @@ pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
                     .sum()
             })
             .unwrap_or(0);
-        let mut dl = voice.dl.lock().unwrap();
-        dl.done = actual;
-        dl.state = if ok && (expected == 0 || actual >= expected) {
-            "done".to_string()
-        } else if ok {
-            "error".to_string()
+        if cancelled {
+            // Отмена: выкидываем частично скачанные файлы и сбрасываем прогресс.
+            let _ = std::fs::remove_dir_all(&dir);
+            let mut dl = voice.dl.lock().unwrap();
+            dl.id = String::new();
+            dl.done = 0;
+            dl.state = String::new();
         } else {
-            "error".to_string()
-        };
+            let mut dl = voice.dl.lock().unwrap();
+            dl.done = actual;
+            dl.state = if ok && (expected == 0 || actual >= expected) {
+                "done".to_string()
+            } else {
+                "error".to_string()
+            };
+        }
     }
     voice.refresh_status();
 }
@@ -472,12 +493,50 @@ pub async fn run_command(
         }
         "voice_download" => {
             if let Some(id) = cmd["id"].as_str() {
-                let cat = load_catalog();
-                let voice2 = voice.clone();
-                let id = id.to_string();
-                tokio::spawn(async move {
-                    download_model(&voice2, &id, &cat).await;
-                });
+                let busy = voice
+                    .dl
+                    .lock()
+                    .map(|g| g.id == id && g.state == "downloading")
+                    .unwrap_or(false);
+                if busy {
+                    log::info!("{id} уже качается");
+                } else {
+                    let cat = load_catalog();
+                    let voice2 = voice.clone();
+                    let id = id.to_string();
+                    tokio::spawn(async move {
+                        download_model(&voice2, &id, &cat).await;
+                    });
+                }
+            }
+        }
+        "voice_download_cancel" => {
+            if let Ok(mut c) = voice.cancel_dl.lock() {
+                *c = true;
+            }
+            log::info!("отмена скачивания запрошена");
+        }
+        "voice_delete" => {
+            if let Some(id) = cmd["id"].as_str() {
+                let dir = model_dir(id);
+                match std::fs::remove_dir_all(&dir) {
+                    Ok(()) => log::info!("модель {id} удалена ({})", dir.display()),
+                    Err(e) => log::warn!("не удалилась {id}: {e}"),
+                }
+                // Если удалили выбранную модель — снимаем выбор.
+                let cur = voice.stt_model.lock().map(|g| g.clone()).unwrap_or_default();
+                let cur2 = voice.tts_model.lock().map(|g| g.clone()).unwrap_or_default();
+                if cur == id {
+                    if let Ok(mut g) = voice.stt_model.lock() {
+                        *g = String::new();
+                    }
+                }
+                if cur2 == id {
+                    if let Ok(mut g) = voice.tts_model.lock() {
+                        *g = String::new();
+                    }
+                }
+                voice.refresh_status();
             }
         }
         "voice_record_start" => start_recording(voice).await,

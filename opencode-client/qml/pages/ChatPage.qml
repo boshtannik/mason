@@ -8,6 +8,7 @@ Item {
     property var appWindow
 
     readonly property bool busy: appWindow.statusText === "busy"
+    readonly property bool micRight: appWindow.pttPosition === "right"
 
     StatusHeader {
         id: header
@@ -85,11 +86,14 @@ Item {
             id: mic
             visible: appWindow.inputMode !== "text" && !chatPage.busy
             anchors {
-                left: parent.left
-                leftMargin: Theme.paddingSmall
+                left: chatPage.micRight ? undefined : parent.left
+                leftMargin: chatPage.micRight ? 0 : Theme.paddingSmall
+                right: chatPage.micRight ? send.left : undefined
+                rightMargin: chatPage.micRight ? Theme.paddingSmall : 0
                 verticalCenter: parent.verticalCenter
             }
-            icon.source: "image://theme/icon-m-mic"
+            icon.source: appWindow.recording
+                          ? "image://theme/icon-m-stop" : "image://theme/icon-m-mic"
             onClicked: appWindow.startPtt()
         }
 
