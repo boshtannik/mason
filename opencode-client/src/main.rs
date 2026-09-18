@@ -67,6 +67,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bridge_pinned = unsafe { QObjectPinned::new(&bridge) };
     let (pending, prompts) = bridge_pinned.borrow().queues();
     let status = bridge_pinned.borrow().status_handle();
+    let sessions = bridge_pinned.borrow().sessions_handle();
+    let commands = bridge_pinned.borrow().commands_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
@@ -84,6 +86,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let worker_status = status.clone();
+    let worker_sessions = sessions.clone();
+    let worker_commands = commands.clone();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -103,7 +107,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             let _ = url_tx.send(base.clone());
             match base {
-                Some(base) => run_worker(base, env_auth, dispatcher, pending, prompts, worker_status).await,
+                Some(base) => {
+                    run_worker(
+                        base,
+                        env_auth,
+                        dispatcher,
+                        pending,
+                        prompts,
+                        worker_status,
+                        worker_sessions,
+                        worker_commands,
+                    )
+                    .await
+                }
                 None => set_status(&worker_status, "error"),
             }
             drop(guard);
@@ -127,6 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Фоновый воркер: (1) SSE-события → QML-мост, (2) промпты из QML → сервер.
+#[allow(clippy::too_many_arguments)]
 async fn run_worker(
     base: String,
     auth: Option<(String, String)>,
@@ -134,6 +151,8 @@ async fn run_worker(
     worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
     worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
     status: Arc<std::sync::Mutex<String>>,
+    sessions: Arc<std::sync::Mutex<String>>,
+    commands: Arc<std::sync::Mutex<Vec<String>>>,
 ) {
     loop {
         match run_stream(
@@ -143,6 +162,8 @@ async fn run_worker(
             worker_pending.clone(),
             worker_prompts.clone(),
             status.clone(),
+            sessions.clone(),
+            commands.clone(),
         )
         .await
         {
@@ -155,6 +176,7 @@ async fn run_worker(
 }
 
 /// Одна SSE-сессия: `Ok(())` — поток закончился, `Err` — не удалось подключиться.
+#[allow(clippy::too_many_arguments)]
 async fn run_stream(
     base: String,
     auth: Option<(String, String)>,
@@ -162,6 +184,8 @@ async fn run_stream(
     worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
     worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
     status: Arc<std::sync::Mutex<String>>,
+    sessions: Arc<std::sync::Mutex<String>>,
+    commands: Arc<std::sync::Mutex<Vec<String>>>,
 ) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
 
@@ -176,6 +200,11 @@ async fn run_stream(
     let mut current_session: Option<String> = None;
     // id ассистентских сообщений — только их текстовые части идят в ответ.
     let mut assistant_messages: std::collections::HashSet<String> = Default::default();
+    // Периодический рефреш списка сессий (тикаем каждые 200мс; раз в ~3с — запрос).
+    let mut ticks: u32 = 0;
+
+    // Сразу показываем список ранее начатых сессий.
+    refresh_sessions(&client, &sessions).await;
 
     // Цикл: слушаем SSE и параллельно опрашиваем мост на новые промпты.
     loop {
@@ -219,7 +248,7 @@ async fn run_stream(
                                 }
                                 set_status(&status, "idle");
                                 parts.clear();
-                                current_session = None;
+                                refresh_sessions(&client, &sessions).await;
                             }
                         }
                         let _ = changed;
@@ -233,6 +262,67 @@ async fn run_stream(
                 }
             }
             _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+                ticks = ticks.wrapping_add(1);
+
+                // Команды из QML: new / open / rename / delete (JSON).
+                for raw in commands.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
+                    let cmd: serde_json::Value = match serde_json::from_str(&raw) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            log::error!("команда не JSON: {e}: {raw}");
+                            continue;
+                        }
+                    };
+                    let action = cmd["cmd"].as_str().unwrap_or("");
+                    let sid = cmd["id"].as_str().unwrap_or("");
+                    match action {
+                        "new" => match client.create_session().await {
+                            Ok(sess) => match sess["id"].as_str() {
+                                Some(id) => {
+                                    log::info!("new session: {id}");
+                                    current_session = Some(id.to_string());
+                                    parts.clear();
+                                    assistant_messages.clear();
+                                    refresh_sessions(&client, &sessions).await;
+                                }
+                                None => log::error!("new: в ответе нет session.id: {sess}"),
+                            },
+                            Err(e) => log::error!("new_session: {e}"),
+                        },
+                        "open" if !sid.is_empty() => {
+                            log::info!("open session: {sid}");
+                            current_session = Some(sid.to_string());
+                            parts.clear();
+                            assistant_messages.clear();
+                            load_history(&client, sid, &worker_pending).await;
+                            set_status(&status, "idle");
+                        }
+                        "rename" if !sid.is_empty() => {
+                            let title = cmd["title"].as_str().unwrap_or("");
+                            match client.rename_session(sid, title).await {
+                                Ok(()) => {
+                                    log::info!("renamed {sid} -> {title:?}");
+                                    refresh_sessions(&client, &sessions).await;
+                                }
+                                Err(e) => log::error!("rename_session: {e}"),
+                            }
+                        }
+                        "delete" if !sid.is_empty() => {
+                            match client.delete_session(sid).await {
+                                Ok(()) => {
+                                    log::info!("deleted {sid}");
+                                    if current_session.as_deref() == Some(sid) {
+                                        current_session = None;
+                                    }
+                                    refresh_sessions(&client, &sessions).await;
+                                }
+                                Err(e) => log::error!("delete_session: {e}"),
+                            }
+                        }
+                        other => log::warn!("неизвестная команда: {other} ({raw})"),
+                    }
+                }
+
                 for prompt in worker_prompts.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
                     log::info!("QML промпт: {prompt}");
                     set_status(&status, "busy");
@@ -271,8 +361,91 @@ async fn run_stream(
                         }
                     }
                 }
+
+                // Раз в ~3 секунды обновляем список сессий.
+                if ticks % 15 == 0 {
+                    refresh_sessions(&client, &sessions).await;
+                }
             }
         }
+    }
+}
+
+/// Загрузить компактный список сессий в общий буфер для QML.
+async fn refresh_sessions(
+    client: &api::OpenCodeClient,
+    sessions: &Arc<std::sync::Mutex<String>>,
+) {
+    match client.list_sessions().await {
+        Ok(v) => {
+            let compact: Vec<serde_json::Value> = v
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|s| {
+                            let id = s.get("id")?.clone();
+                            let title = s
+                                .get("title")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::String(String::new()));
+                            let updated = s
+                                .get("time")
+                                .and_then(|t| t.get("updated"))
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Number(0.into()));
+                            Some(serde_json::json!({ "id": id, "title": title, "updated": updated }))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let json = serde_json::Value::Array(compact).to_string();
+            if let Ok(mut g) = sessions.lock() {
+                *g = json;
+            }
+        }
+        Err(e) => log::error!("list_sessions: {e}"),
+    }
+}
+
+/// Загрузить историю сессии (пары info/parts) и положить строки в очередь QML.
+async fn load_history(
+    client: &api::OpenCodeClient,
+    session_id: &str,
+    pending: &Arc<std::sync::Mutex<Vec<String>>>,
+) {
+    match client.session_messages(session_id).await {
+        Ok(v) => {
+            let mut items: Vec<&serde_json::Value> =
+                v.as_array().map(|a| a.iter().collect()).unwrap_or_default();
+            items.sort_by_key(|e| e["info"]["time"]["created"].as_u64().unwrap_or(0));
+            let mut lines: Vec<String> = Vec::new();
+            for e in items {
+                let role = e["info"]["role"].as_str().unwrap_or("");
+                let mut text = String::new();
+                if let Some(parts) = e["parts"].as_array() {
+                    for p in parts {
+                        if p["type"].as_str() == Some("text") {
+                            if let Some(t) = p["text"].as_str() {
+                                text.push_str(t);
+                            }
+                        }
+                    }
+                }
+                if text.trim().is_empty() {
+                    continue;
+                }
+                if role == "user" {
+                    lines.push(format!(">>> {text}"));
+                } else {
+                    lines.push(text);
+                }
+            }
+            log::info!("история сессии {session_id}: {} строк", lines.len());
+            if let Ok(mut q) = pending.lock() {
+                q.extend(lines);
+            }
+        }
+        Err(e) => log::error!("session_messages: {e}"),
     }
 }
 

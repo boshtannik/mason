@@ -26,6 +26,12 @@ pub struct AppBridge {
     /// Qt-сигналы из чужих потоков не эмитим — поэтому отдельный Arc.
     #[allow(dead_code)]
     status_shared: Arc<Mutex<String>>,
+    /// Список сессий (JSON `[{id,title,updated}]`), пишет воркер, читает QML.
+    #[allow(dead_code)]
+    sessions_shared: Arc<Mutex<String>>,
+    /// Команды от QML воркеру: `"new"` | `"open:<sessionID>"`.
+    #[allow(dead_code)]
+    commands_shared: Arc<Mutex<Vec<String>>>,
 
     /// QML: забрать и очистить накопленные сообщения (polling).
     drain_messages: qt_method!(fn drain_messages(&self) -> QString {
@@ -50,6 +56,41 @@ pub struct AppBridge {
     status_text: qt_method!(fn status_text(&self) -> QString {
         let v = self.status_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
+    }),
+    /// QML: список сессий как JSON (read-only, обновляется воркером).
+    sessions_json: qt_method!(fn sessions_json(&self) -> QString {
+        let v = self.sessions_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+    /// QML: создать новую сессию.
+    new_session: qt_method!(fn new_session(&self) {
+        log::info!("QML new_session");
+        self.push_command(serde_json::json!({ "cmd": "new" }));
+    }),
+    /// QML: открыть сессию по id (загрузит историю).
+    open_session: qt_method!(fn open_session(&self, id: QString) {
+        let id = id.to_string();
+        log::info!("QML open_session -> {id:?}");
+        if !id.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": "open", "id": id }));
+        }
+    }),
+    /// QML: переименовать сессию.
+    rename_session: qt_method!(fn rename_session(&self, id: QString, title: QString) {
+        let id = id.to_string();
+        let title = title.to_string();
+        log::info!("QML rename_session {id:?} -> {title:?}");
+        if !id.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": "rename", "id": id, "title": title }));
+        }
+    }),
+    /// QML: удалить сессию.
+    delete_session: qt_method!(fn delete_session(&self, id: QString) {
+        let id = id.to_string();
+        log::info!("QML delete_session {id:?}");
+        if !id.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": "delete", "id": id }));
+        }
     }),
 }
 
@@ -87,6 +128,23 @@ impl AppBridge {
     pub fn set_status_shared(&self, s: &str) {
         if let Ok(mut g) = self.status_shared.lock() {
             *g = s.to_string();
+        }
+    }
+
+    /// Хэндл списка сессий для воркера.
+    pub fn sessions_handle(&self) -> Arc<Mutex<String>> {
+        self.sessions_shared.clone()
+    }
+
+    /// Хэндл очереди команд для воркера.
+    pub fn commands_handle(&self) -> Arc<Mutex<Vec<String>>> {
+        self.commands_shared.clone()
+    }
+
+    /// Положить JSON-команду в очередь для воркера.
+    fn push_command(&self, v: serde_json::Value) {
+        if let Ok(mut q) = self.commands_shared.lock() {
+            q.push(v.to_string());
         }
     }
 }

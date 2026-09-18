@@ -31,6 +31,59 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
+    /// GET /session -> список сессий (свежие обычно сверху).
+    pub async fn list_sessions(&self) -> Result<serde_json::Value, String> {
+        let url = format!("{}/session", self.base);
+        let resp = self
+            .authed(self.http.get(&url))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    /// PATCH /session/{id} -> переименовать сессию.
+    pub async fn rename_session(&self, session_id: &str, title: &str) -> Result<(), String> {
+        let url = format!("{}/session/{session_id}", self.base);
+        let resp = self
+            .authed(self.http.patch(&url))
+            .json(&serde_json::json!({ "title": title }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("rename status: {}", resp.status()));
+        }
+        Ok(())
+    }
+
+    /// DELETE /session/{id} -> удалить сессию.
+    pub async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+        let url = format!("{}/session/{session_id}", self.base);
+        let resp = self
+            .authed(self.http.delete(&url))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("delete status: {}", resp.status()));
+        }
+        Ok(())
+    }
+
+    /// GET /session/{id}/message -> `[{ info: Message, parts: [...] }]`.
+    pub async fn session_messages(&self, session_id: &str) -> Result<serde_json::Value, String> {
+        let url = format!("{}/session/{session_id}/message", self.base);
+        let resp = self
+            .authed(self.http.get(&url))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
     /// POST /session/{id}/prompt_async — отправить промпт, не ждать ответа (SSE принесёт результат).
     pub async fn prompt_async(&self, session_id: &str, text: &str) -> Result<(), String> {
         let url = format!("{}/session/{session_id}/prompt_async", self.base);

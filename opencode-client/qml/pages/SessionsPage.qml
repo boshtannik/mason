@@ -21,12 +21,39 @@ Item {
 
             Label {
                 x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
                 anchors.verticalCenter: parent.verticalCenter
-                text: modelData
+                truncationMode: TruncationMode.Fade
+                text: (modelData && modelData.title && modelData.title.length > 0)
+                      ? modelData.title
+                      : (modelData ? modelData.id : "")
                 color: item.highlighted ? Theme.highlightColor : Theme.primaryColor
             }
 
-            onClicked: appWindow.openSession(modelData)
+            menu: ContextMenu {
+                MenuItem {
+                    text: qsTr("Настройки сессии")
+                    onClicked: appWindow.openSessionSettings(modelData.id)
+                }
+                MenuItem {
+                    text: qsTr("Переименовать")
+                    onClicked: appWindow.pageStack.push(renameDialog, {
+                        sessionId: modelData.id,
+                        currentTitle: modelData.title
+                    })
+                }
+                MenuItem {
+                    text: qsTr("Удалить")
+                    onClicked: {
+                        var sid = modelData.id
+                        remorse.execute(qsTr("Удаление сессии"), function() {
+                            appWindow.deleteSession(sid)
+                        })
+                    }
+                }
+            }
+
+            onClicked: appWindow.openSession(modelData.id)
         }
 
         PullDownMenu {
@@ -43,5 +70,45 @@ Item {
         }
 
         VerticalScrollDecorator {}
+    }
+
+    RemorsePopup {
+        id: remorse
+    }
+
+    Component {
+        id: renameDialog
+
+        Dialog {
+            id: dlg
+            property string sessionId
+            property string currentTitle
+
+            canAccept: titleField.text.trim().length > 0
+            onAccepted: appWindow.renameSession(sessionId, titleField.text.trim())
+            onStatusChanged: {
+                if (status === PageStatus.Active) {
+                    titleField.forceActiveFocus()
+                }
+            }
+
+            Column {
+                width: parent.width
+
+                DialogHeader {
+                    acceptText: qsTr("Переименовать")
+                }
+                TextField {
+                    id: titleField
+                    width: parent.width
+                    label: qsTr("Название сессии")
+                    text: dlg.currentTitle
+                    inputMethodHints: Qt.ImhNoPredictiveText
+                    EnterKey.enabled: text.trim().length > 0
+                    EnterKey.iconSource: "image://theme/icon-m-enter-accept"
+                    EnterKey.onClicked: dlg.accept()
+                }
+            }
+        }
     }
 }

@@ -19,6 +19,9 @@ ApplicationWindow {
     property bool sttModelReady: false
     property bool ttsModelReady: false
 
+    // Запрос переключить страницу карусели (0..3).
+    signal requestPage(int index)
+
     Timer {
         id: pollTimer
         interval: 300
@@ -32,15 +35,23 @@ ApplicationWindow {
         if (st !== undefined && st !== "")
             app.statusText = st
         var msgs = bridge.drain_messages()
-        if (msgs === "" || msgs === undefined)
-            return
-        var lines = msgs.split("\n")
-        var acc = app.messages
-        for (var i = 0; i < lines.length; i++) {
-            if (lines[i] !== "")
-                acc = acc.concat(lines[i])
+        if (msgs !== "" && msgs !== undefined) {
+            var lines = msgs.split("\n")
+            var acc = app.messages
+            for (var i = 0; i < lines.length; i++) {
+                if (lines[i] !== "")
+                    acc = acc.concat(lines[i])
+            }
+            app.messages = acc
         }
-        app.messages = acc
+        var sess = bridge.sessions_json()
+        if (sess !== "" && sess !== undefined) {
+            try {
+                app.sessions = JSON.parse(sess)
+            } catch (e) {
+                console.log("sessions parse error: " + e)
+            }
+        }
     }
 
     function statusColor(s) {
@@ -65,11 +76,40 @@ ApplicationWindow {
 
     function clearHistory() { app.messages = [] }
     function startPtt() { console.log("PTT: not implemented yet") }
-    function newSession() { console.log("newSession: TODO") }
-    function openSession(id) { console.log("openSession: " + id) }
+
+    function newSession() {
+        app.messages = []
+        bridge.new_session()
+        app.requestPage(2)
+    }
+
+    function openSession(id) {
+        app.messages = []
+        bridge.open_session(id)
+        app.requestPage(2)
+    }
+
+    function openSessionSettings(id) {
+        app.messages = []
+        bridge.open_session(id)
+        app.requestPage(3)
+    }
+
+    function renameSession(id, title) {
+        bridge.rename_session(id, title)
+    }
+
+    function deleteSession(id) {
+        bridge.delete_session(id)
+    }
 
     initialPage: Component {
         Page {
+            Connections {
+                target: app
+                onRequestPage: pager.currentIndex = index
+            }
+
             // Карусель: [0] Global | [1] Sessions | [2] Chat | [3] Session
             // PagedView даёт снап и горизонтальный свайп (snapMode у Flickable — баг, см. память).
             PagedView {
