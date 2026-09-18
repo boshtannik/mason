@@ -24,6 +24,14 @@ docker run --rm -v "$PROJ:/src:ro" -v "$OUT:/out" "$IMAGE" bash -lc '
     --exclude=./docker \
     . | tar -xf - -C ~/opencode-build
   cd ~/opencode-build
+  # Зависимости для голоса: whisper.cpp (STT). Cкачиваем вне mb2 — у целевого
+  # gitHub/HF доступа обычно нет.
+  mkdir -p third_party
+  curl -fsSL -o /tmp/whisper.cpp.tar.gz \
+    "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.5.4.tar.gz"
+  tar -xzf /tmp/whisper.cpp.tar.gz -C third_party
+  mv third_party/whisper.cpp-1.5.4 third_party/whisper.cpp
+  ls -d third_party/whisper.cpp
   mb2 -n -t SailfishOS-5.1.0.11-aarch64 --no-snapshot=force build
   echo "=== RPM ==="
   ls -l RPMS/*.rpm

@@ -54,6 +54,57 @@ Item {
                 }
             }
 
+            SectionHeader { text: qsTr("Voice") }
+
+            ComboBox {
+                label: qsTr("Recognition language")
+                currentIndex: appWindow.voiceLangOptions.indexOf(appWindow.voiceLang)
+                menu: ContextMenu {
+                    Repeater {
+                        model: appWindow.voiceLangOptions
+                        MenuItem { text: modelData }
+                    }
+                }
+                onCurrentIndexChanged: {
+                    var o = appWindow.voiceLangOptions
+                    if (currentIndex >= 0 && currentIndex < o.length
+                        && o[currentIndex] !== appWindow.voiceLang)
+                        appWindow.voiceCmd("voice_lang", o[currentIndex])
+                }
+            }
+
+            BackgroundItem {
+                width: parent.width
+                contentHeight: Theme.itemSizeSmall
+                Label {
+                    x: Theme.horizontalPageMargin
+                    width: parent.width - 2 * Theme.horizontalPageMargin
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("STT model") + ": " + appWindow.sttModelName()
+                    truncationMode: TruncationMode.Fade
+                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
+                }
+                onClicked: globalSettingsPage.appWindow.pageStack.push(
+                               sttPickerComponent,
+                               { appWindow: globalSettingsPage.appWindow })
+            }
+
+            BackgroundItem {
+                width: parent.width
+                contentHeight: Theme.itemSizeSmall
+                Label {
+                    x: Theme.horizontalPageMargin
+                    width: parent.width - 2 * Theme.horizontalPageMargin
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("TTS voice") + ": " + appWindow.ttsModelName()
+                    truncationMode: TruncationMode.Fade
+                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
+                }
+                onClicked: globalSettingsPage.appWindow.pageStack.push(
+                               ttsPickerComponent,
+                               { appWindow: globalSettingsPage.appWindow })
+            }
+
             SectionHeader { text: qsTr("Speakers") }
 
             ComboBox {
@@ -142,8 +193,8 @@ Item {
                 x: Theme.horizontalPageMargin
                 width: parent.width - 2 * Theme.horizontalPageMargin
                 text: qsTr("STT: %1\nTTS: %2")
-                      .arg(appWindow.sttModelReady ? qsTr("ready") : qsTr("not loaded"))
-                      .arg(appWindow.ttsModelReady ? qsTr("ready") : qsTr("not loaded"))
+                      .arg(appWindow.sttModelName())
+                      .arg(appWindow.ttsModelName())
                 wrapMode: Text.Wrap
                 color: Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeExtraSmall
@@ -186,6 +237,158 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData.path === soundPickerPage.appWindow.dingSound ? "✓" : ""
                         color: Theme.highlightColor
+                    }
+                }
+                VerticalScrollDecorator {}
+            }
+        }
+    }
+
+    // Пикер STT-моделей (whisper): тап — скачать / выбрать.
+    Component {
+        id: sttPickerComponent
+        Page {
+            id: sttPickerPage
+            property var appWindow
+            property var list: sttPickerPage.appWindow !== undefined
+                               ? sttPickerPage.appWindow.voiceModelsFor("stt_whisper") : []
+
+            function sub(m) {
+                var s = m.lang_id + " · " + sttPickerPage.appWindow.humanSize(m.size)
+                if (m.downloaded)
+                    s += " ✓"
+                return s
+            }
+            function rightText(m) {
+                if (m.model_id === sttPickerPage.appWindow.chosenStt)
+                    return qsTr("selected")
+                if (m.downloaded)
+                    return qsTr("select")
+                if (m.state === "downloading")
+                    return "…"
+                return qsTr("download")
+            }
+
+            SilicaListView {
+                anchors.fill: parent
+                model: sttPickerPage.list
+                header: PageHeader { title: qsTr("Recognition models") }
+                delegate: ListItem {
+                    contentHeight: Theme.itemSizeMedium
+                    onClicked: {
+                        if (modelData.downloaded) {
+                            sttPickerPage.appWindow.voiceCmd(
+                                "voice_select_stt", modelData.model_id)
+                            sttPickerPage.appWindow.pageStack.pop()
+                        } else if (modelData.state !== "downloading") {
+                            sttPickerPage.appWindow.voiceCmd(
+                                "voice_download", modelData.model_id)
+                        }
+                    }
+                    Column {
+                        x: Theme.horizontalPageMargin
+                        width: parent.width - 2 * Theme.horizontalPageMargin
+                                 - Theme.itemSizeSmall
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 2
+                        Label {
+                            text: modelData.name
+                            width: parent.width
+                            truncationMode: TruncationMode.Fade
+                            color: parent.parent.highlighted
+                                   ? Theme.highlightColor : Theme.primaryColor
+                        }
+                        Label {
+                            text: sttPickerPage.sub(modelData)
+                            width: parent.width
+                            truncationMode: TruncationMode.Fade
+                            color: Theme.secondaryColor
+                            font.pixelSize: Theme.fontSizeExtraSmall
+                        }
+                    }
+                    Label {
+                        anchors.right: parent.right
+                        anchors.rightMargin: Theme.horizontalPageMargin
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: sttPickerPage.rightText(modelData)
+                        color: Theme.highlightColor
+                        font.pixelSize: Theme.fontSizeExtraSmall
+                    }
+                }
+                VerticalScrollDecorator {}
+            }
+        }
+    }
+
+    // Пикер TTS-голосов (piper): тап — скачать / выбрать.
+    Component {
+        id: ttsPickerComponent
+        Page {
+            id: ttsPickerPage
+            property var appWindow
+            property var list: ttsPickerPage.appWindow !== undefined
+                               ? ttsPickerPage.appWindow.voiceModelsFor("tts_piper") : []
+
+            function sub(m) {
+                var s = m.lang_id + " · " + ttsPickerPage.appWindow.humanSize(m.size)
+                if (m.downloaded)
+                    s += " ✓"
+                return s
+            }
+            function rightText(m) {
+                if (m.model_id === ttsPickerPage.appWindow.chosenTts)
+                    return qsTr("selected")
+                if (m.downloaded)
+                    return qsTr("select")
+                if (m.state === "downloading")
+                    return "…"
+                return qsTr("download")
+            }
+
+            SilicaListView {
+                anchors.fill: parent
+                model: ttsPickerPage.list
+                header: PageHeader { title: qsTr("Voices (TTS)") }
+                delegate: ListItem {
+                    contentHeight: Theme.itemSizeMedium
+                    onClicked: {
+                        if (modelData.downloaded) {
+                            ttsPickerPage.appWindow.voiceCmd(
+                                "voice_select_tts", modelData.model_id)
+                            ttsPickerPage.appWindow.pageStack.pop()
+                        } else if (modelData.state !== "downloading") {
+                            ttsPickerPage.appWindow.voiceCmd(
+                                "voice_download", modelData.model_id)
+                        }
+                    }
+                    Column {
+                        x: Theme.horizontalPageMargin
+                        width: parent.width - 2 * Theme.horizontalPageMargin
+                                 - Theme.itemSizeSmall
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 2
+                        Label {
+                            text: modelData.name
+                            width: parent.width
+                            truncationMode: TruncationMode.Fade
+                            color: parent.parent.highlighted
+                                   ? Theme.highlightColor : Theme.primaryColor
+                        }
+                        Label {
+                            text: ttsPickerPage.sub(modelData)
+                            width: parent.width
+                            truncationMode: TruncationMode.Fade
+                            color: Theme.secondaryColor
+                            font.pixelSize: Theme.fontSizeExtraSmall
+                        }
+                    }
+                    Label {
+                        anchors.right: parent.right
+                        anchors.rightMargin: Theme.horizontalPageMargin
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: ttsPickerPage.rightText(modelData)
+                        color: Theme.highlightColor
+                        font.pixelSize: Theme.fontSizeExtraSmall
                     }
                 }
                 VerticalScrollDecorator {}

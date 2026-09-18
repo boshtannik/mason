@@ -34,6 +34,15 @@ ApplicationWindow {
     // Выбранный звук уведомления (сохраняется в настройках DConf).
     property string dingSound: dingSetting.value
 
+    // Голосовой модуль: статус из воркера (`voice_status_json`).
+    property var voiceModels: []
+    property variant voiceLangOptions: ["auto"]
+    property string chosenStt: ""
+    property string chosenTts: ""
+    property string voiceLang: "auto"
+    // Идёт ли запись с микрофона (PTT-переключатель).
+    property bool recording: false
+
     // Запрос переключить страницу карусели (0..3).
     signal requestPage(int index)
 
@@ -84,8 +93,12 @@ ApplicationWindow {
             var lines = msgs.split("\n")
             var acc = app.messages
             for (var i = 0; i < lines.length; i++) {
-                if (lines[i] !== "")
-                    acc = acc.concat(lines[i])
+                var line = lines[i]
+                if (line !== "") {
+                    // Служебные метки воркера сразу убираем из текста.
+                    line = line.replace(/^\[\[stt\]\] /, "")
+                    acc = acc.concat(line)
+                }
             }
             app.messages = acc
         }
@@ -132,6 +145,20 @@ ApplicationWindow {
         var nav = bridge.take_nav()
         if (nav !== undefined && nav >= 0)
             app.requestPage(nav)
+        var v = bridge.voice_status_json()
+        if (v !== "" && v !== undefined) {
+            try {
+                var vo = JSON.parse(v)
+                app.voiceModels = vo.models || []
+                app.chosenStt = vo.stt || ""
+                app.chosenTts = vo.tts || ""
+                app.voiceLang = vo.lang || "auto"
+                if (vo.langs && vo.langs.length)
+                    app.voiceLangOptions = ["auto"].concat(vo.langs)
+            } catch (e) {
+                console.log("voice parse error: " + e)
+            }
+        }
     }
 
     function statusColor(s) {
@@ -155,7 +182,47 @@ ApplicationWindow {
     }
 
     function clearHistory() { app.messages = [] }
-    function startPtt() { console.log("PTT: not implemented yet") }
+
+    // --- Голосовой модуль -------------------------------------------------
+    function voiceCmd(cmd, val) {
+        bridge.voice_command(cmd, val === undefined ? "" : val)
+    }
+    function startPtt() {
+        if (!app.recording) {
+            app.recording = true
+            app.voiceCmd("voice_record_start", "")
+        } else {
+            app.recording = false
+            app.voiceCmd("voice_record_stop", "")
+        }
+    }
+    function voiceModelsFor(engine) {
+        var out = []
+        for (var i = 0; i < app.voiceModels.length; i++)
+            if (app.voiceModels[i].engine === engine)
+                out.push(app.voiceModels[i])
+        return out
+    }
+    function modelName(id, list) {
+        for (var i = 0; i < list.length; i++)
+            if (list[i].model_id === id)
+                return list[i].name
+        return "—"
+    }
+    function sttModelName() {
+        return app.modelName(app.chosenStt, app.voiceModelsFor("stt_whisper"))
+    }
+    function ttsModelName() {
+        return app.modelName(app.chosenTts, app.voiceModelsFor("tts_piper"))
+    }
+    function humanSize(b) {
+        if (!b) return ""
+        var g = b / (1024*1024*1024)
+        if (g >= 1) return g.toFixed(1) + " GB"
+        var m = b / (1024*1024)
+        if (m >= 1) return Math.round(m) + " MB"
+        return Math.round(b / 1024) + " KB"
+    }
 
     function newSession() {
         app.messages = []

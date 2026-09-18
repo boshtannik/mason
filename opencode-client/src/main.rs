@@ -13,6 +13,7 @@ use opencode_client::api;
 use opencode_client::bridge::app::AppBridge;
 use opencode_client::event;
 use opencode_client::server;
+use opencode_client::voice;
 
 /// Единственный QML-файл приложения (лежит в /usr/share/harbour-opencode/qml).
 const MAIN_QML: &str = "qml/harbour-opencode.qml";
@@ -77,6 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let todos = bridge_pinned.borrow().todo_handle();
     let models = bridge_pinned.borrow().models_handle();
     let sounds = bridge_pinned.borrow().sounds_handle();
+    let voice = voice::VoiceState::with_status(bridge_pinned.borrow().voice_status_handle());
     bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
@@ -101,6 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_todos = todos.clone();
     let worker_models = models.clone();
     let worker_sounds = sounds.clone();
+    let worker_voice = voice.clone();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -135,6 +138,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         worker_todos,
                         worker_models,
                         worker_sounds,
+                        worker_voice,
                     )
                     .await
                 }
@@ -176,6 +180,7 @@ async fn run_worker(
     todos: Arc<std::sync::Mutex<String>>,
     models: Arc<std::sync::Mutex<String>>,
     sounds: Arc<std::sync::Mutex<String>>,
+    voice: Arc<voice::VoiceState>,
 ) {
     loop {
         match run_stream(
@@ -192,6 +197,7 @@ async fn run_worker(
             todos.clone(),
             models.clone(),
             sounds.clone(),
+            voice.clone(),
         )
         .await
         {
@@ -219,6 +225,7 @@ async fn run_stream(
     todos: Arc<std::sync::Mutex<String>>,
     models: Arc<std::sync::Mutex<String>>,
     sounds: Arc<std::sync::Mutex<String>>,
+    voice: Arc<voice::VoiceState>,
 ) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
 
@@ -438,6 +445,15 @@ async fn run_stream(
                                 }
                                 Err(e) => log::error!("delete_session: {e}"),
                             }
+                        }
+                        "voice_lang"
+                        | "voice_select_stt"
+                        | "voice_select_tts"
+                        | "voice_download"
+                        | "voice_record_start"
+                        | "voice_record_stop"
+                        | "voice_stt" => {
+                            voice::run_command(&voice, &cmd, &worker_pending).await;
                         }
                         other => log::warn!("неизвестная команда: {other} ({raw})"),
                     }

@@ -47,6 +47,9 @@ pub struct AppBridge {
     /// Список доступных системных звуков (JSON `[{name,path}]`), пишет воркер, читает QML.
     #[allow(dead_code)]
     sounds_shared: Arc<Mutex<String>>,
+    /// JSON-статус голосового модуля (каталог моделей + прогресс), пишет воркер.
+    #[allow(dead_code)]
+    voice_status_shared: Arc<Mutex<String>>,
 
     /// QML: забрать и очистить накопленные сообщения (polling).
     drain_messages: qt_method!(fn drain_messages(&self) -> QString {
@@ -167,6 +170,11 @@ pub struct AppBridge {
         let v = self.sounds_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
+    /// QML: статус голосового модуля как JSON (read-only).
+    voice_status_json: qt_method!(fn voice_status_json(&self) -> QString {
+        let v = self.voice_status_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
     /// QML: переключить модель сессии.
     set_model: qt_method!(fn set_model(&self, id: QString, provider: QString, model: QString) {
         let id = id.to_string();
@@ -189,6 +197,15 @@ pub struct AppBridge {
                 v
             })
             .unwrap_or(-1)
+    }),
+    /// QML: голосовая команда (cmd + payload: id модели / lang). Async — воркер.
+    voice_command: qt_method!(fn voice_command(&self, cmd: QString, val: QString) {
+        let cmd = cmd.to_string();
+        let val = val.to_string();
+        log::info!("QML voice {cmd:?} {val:?}");
+        if !cmd.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": cmd, "id": val }));
+        }
     }),
 }
 
@@ -262,6 +279,11 @@ impl AppBridge {
     /// Хэндл списка системных звуков для воркера.
     pub fn sounds_handle(&self) -> Arc<Mutex<String>> {
         self.sounds_shared.clone()
+    }
+
+    /// Хэндл статуса голосового модуля для воркера.
+    pub fn voice_status_handle(&self) -> Arc<Mutex<String>> {
+        self.voice_status_shared.clone()
     }
 
     /// Положить JSON-команду в очередь для воркера.
