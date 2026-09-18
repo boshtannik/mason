@@ -69,6 +69,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let status = bridge_pinned.borrow().status_handle();
     let sessions = bridge_pinned.borrow().sessions_handle();
     let commands = bridge_pinned.borrow().commands_handle();
+    let current_session = bridge_pinned.borrow().current_session_handle();
+    let nav = bridge_pinned.borrow().nav_handle();
+    if let Ok(mut n) = nav.lock() {
+        *n = -1;
+    }
+    let todos = bridge_pinned.borrow().todo_handle();
+    let models = bridge_pinned.borrow().models_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
@@ -88,6 +95,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_status = status.clone();
     let worker_sessions = sessions.clone();
     let worker_commands = commands.clone();
+    let worker_current = current_session.clone();
+    let worker_nav = nav.clone();
+    let worker_todos = todos.clone();
+    let worker_models = models.clone();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -117,6 +128,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         worker_status,
                         worker_sessions,
                         worker_commands,
+                        worker_current,
+                        worker_nav,
+                        worker_todos,
+                        worker_models,
                     )
                     .await
                 }
@@ -153,6 +168,10 @@ async fn run_worker(
     status: Arc<std::sync::Mutex<String>>,
     sessions: Arc<std::sync::Mutex<String>>,
     commands: Arc<std::sync::Mutex<Vec<String>>>,
+    current_session: Arc<std::sync::Mutex<String>>,
+    nav: Arc<std::sync::Mutex<i32>>,
+    todos: Arc<std::sync::Mutex<String>>,
+    models: Arc<std::sync::Mutex<String>>,
 ) {
     loop {
         match run_stream(
@@ -164,6 +183,10 @@ async fn run_worker(
             status.clone(),
             sessions.clone(),
             commands.clone(),
+            current_session.clone(),
+            nav.clone(),
+            todos.clone(),
+            models.clone(),
         )
         .await
         {
@@ -186,6 +209,10 @@ async fn run_stream(
     status: Arc<std::sync::Mutex<String>>,
     sessions: Arc<std::sync::Mutex<String>>,
     commands: Arc<std::sync::Mutex<Vec<String>>>,
+    current_session_shared: Arc<std::sync::Mutex<String>>,
+    nav: Arc<std::sync::Mutex<i32>>,
+    todos: Arc<std::sync::Mutex<String>>,
+    models: Arc<std::sync::Mutex<String>>,
 ) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
 
@@ -203,8 +230,9 @@ async fn run_stream(
     // Периодический рефреш списка сессий (тикаем каждые 200мс; раз в ~3с — запрос).
     let mut ticks: u32 = 0;
 
-    // Сразу показываем список ранее начатых сессий.
+    // Сразу показываем список ранее начатых сессий и доступные модели.
     refresh_sessions(&client, &sessions).await;
+    refresh_models(&client, &models).await;
 
     // Цикл: слушаем SSE и параллельно опрашиваем мост на новые промпты.
     loop {
@@ -284,6 +312,10 @@ async fn run_stream(
                                     parts.clear();
                                     assistant_messages.clear();
                                     refresh_sessions(&client, &sessions).await;
+                                    set_current_session(&current_session_shared, &current_session);
+                                    if let Ok(mut g) = todos.lock() {
+                                        *g = "[]".to_string();
+                                    }
                                 }
                                 None => log::error!("new: в ответе нет session.id: {sess}"),
                             },
@@ -296,6 +328,83 @@ async fn run_stream(
                             assistant_messages.clear();
                             load_history(&client, sid, &worker_pending).await;
                             set_status(&status, "idle");
+                            set_current_session(&current_session_shared, &current_session);
+                            refresh_todo(&client, sid, &todos).await;
+                        }
+                        "fork" if !sid.is_empty() => {
+                            match client.fork_session(sid).await {
+                                Ok(sess) => match sess["id"].as_str() {
+                                    Some(new_id) => {
+                                        log::info!("fork {sid} -> {new_id}");
+                                        current_session = Some(new_id.to_string());
+                                        parts.clear();
+                                        assistant_messages.clear();
+                                        load_history(&client, new_id, &worker_pending).await;
+                                        refresh_sessions(&client, &sessions).await;
+                                        set_current_session(&current_session_shared, &current_session);
+                                        refresh_todo(&client, new_id, &todos).await;
+                                        request_nav(&nav, 2);
+                                    }
+                                    None => log::error!("fork: в ответе нет id: {sess}"),
+                                },
+                                Err(e) => log::error!("fork_session: {e}"),
+                            }
+                        }
+                        "share" if !sid.is_empty() => {
+                            match client.share_session(sid).await {
+                                Ok(sess) => {
+                                    let url = sess["share"]["url"].as_str().unwrap_or("");
+                                    log::info!("share {sid} -> {url}");
+                                    refresh_sessions(&client, &sessions).await;
+                                }
+                                Err(e) => log::error!("share_session: {e}"),
+                            }
+                        }
+                        "unshare" if !sid.is_empty() => {
+                            match client.unshare_session(sid).await {
+                                Ok(()) => {
+                                    log::info!("unshare {sid}");
+                                    refresh_sessions(&client, &sessions).await;
+                                }
+                                Err(e) => log::error!("unshare_session: {e}"),
+                            }
+                        }
+                        "summarize" if !sid.is_empty() => {
+                            match client.get_session(sid).await {
+                                Ok(s) => {
+                                    let provider = s["model"]["providerID"].as_str().unwrap_or("");
+                                    let model = s["model"]["id"].as_str().unwrap_or("");
+                                    if provider.is_empty() || model.is_empty() {
+                                        log::error!("summarize: у сессии нет модели: {s}");
+                                    } else {
+                                        match client.summarize_session(sid, provider, model).await {
+                                            Ok(()) => log::info!("summarize {sid} ({provider}/{model})"),
+                                            Err(e) => log::error!("summarize_session: {e}"),
+                                        }
+                                    }
+                                }
+                                Err(e) => log::error!("get_session: {e}"),
+                            }
+                        }
+                        "abort" if !sid.is_empty() => {
+                            match client.abort(sid).await {
+                                Ok(_) => {
+                                    log::info!("abort {sid}");
+                                    set_status(&status, "idle");
+                                }
+                                Err(e) => log::error!("abort: {e}"),
+                            }
+                        }
+                        "set_model" if !sid.is_empty() => {
+                            let provider = cmd["provider"].as_str().unwrap_or("");
+                            let model = cmd["model"].as_str().unwrap_or("");
+                            match client.set_model(sid, provider, model).await {
+                                Ok(()) => {
+                                    log::info!("set_model {sid} -> {provider}/{model}");
+                                    refresh_sessions(&client, &sessions).await;
+                                }
+                                Err(e) => log::error!("set_model: {e}"),
+                            }
                         }
                         "rename" if !sid.is_empty() => {
                             let title = cmd["title"].as_str().unwrap_or("");
@@ -313,6 +422,10 @@ async fn run_stream(
                                     log::info!("deleted {sid}");
                                     if current_session.as_deref() == Some(sid) {
                                         current_session = None;
+                                        set_current_session(&current_session_shared, &current_session);
+                                        if let Ok(mut g) = todos.lock() {
+                                            *g = "[]".to_string();
+                                        }
                                     }
                                     refresh_sessions(&client, &sessions).await;
                                 }
@@ -330,7 +443,10 @@ async fn run_stream(
                     if current_session.is_none() {
                         match client.create_session().await {
                             Ok(sess) => match sess["id"].as_str() {
-                                Some(id) => current_session = Some(id.to_string()),
+                                Some(id) => {
+                                    current_session = Some(id.to_string());
+                                    set_current_session(&current_session_shared, &current_session);
+                                }
                                 None => {
                                     let msg = format!("в ответе нет session.id: {sess}");
                                     log::error!("{msg}");
@@ -362,9 +478,12 @@ async fn run_stream(
                     }
                 }
 
-                // Раз в ~3 секунды обновляем список сессий.
+                // Раз в ~3 секунды обновляем список сессий и TODO текущей сессии.
                 if ticks % 15 == 0 {
                     refresh_sessions(&client, &sessions).await;
+                    if let Some(sid) = current_session.clone() {
+                        refresh_todo(&client, &sid, &todos).await;
+                    }
                 }
             }
         }
@@ -393,7 +512,33 @@ async fn refresh_sessions(
                                 .and_then(|t| t.get("updated"))
                                 .cloned()
                                 .unwrap_or(serde_json::Value::Number(0.into()));
-                            Some(serde_json::json!({ "id": id, "title": title, "updated": updated }))
+                            let share_url = s
+                                .get("share")
+                                .and_then(|sh| sh.get("url"))
+                                .cloned()
+                                .unwrap_or(serde_json::Value::String(String::new()));
+                            let provider_id = s
+                                .get("model")
+                                .and_then(|m| m.get("providerID"))
+                                .cloned()
+                                .unwrap_or(serde_json::Value::String(String::new()));
+                            let model_id = s
+                                .get("model")
+                                .and_then(|m| m.get("id"))
+                                .cloned()
+                                .unwrap_or(serde_json::Value::String(String::new()));
+                            let cost = s.get("cost").cloned().unwrap_or(serde_json::Value::Number(0.into()));
+                            let tokens = s.get("tokens").cloned().unwrap_or(serde_json::Value::Null);
+                            Some(serde_json::json!({
+                                "id": id,
+                                "title": title,
+                                "updated": updated,
+                                "shareUrl": share_url,
+                                "providerID": provider_id,
+                                "modelID": model_id,
+                                "cost": cost,
+                                "tokens": tokens,
+                            }))
                         })
                         .collect()
                 })
@@ -404,6 +549,60 @@ async fn refresh_sessions(
             }
         }
         Err(e) => log::error!("list_sessions: {e}"),
+    }
+}
+
+/// Загрузить TODO-задачи сессии в общий буфер для QML.
+async fn refresh_todo(
+    client: &api::OpenCodeClient,
+    session_id: &str,
+    todos: &Arc<std::sync::Mutex<String>>,
+) {
+    match client.session_todo(session_id).await {
+        Ok(v) => {
+            if let Ok(mut g) = todos.lock() {
+                *g = v.to_string();
+            }
+        }
+        Err(e) => log::error!("session_todo: {e}"),
+    }
+}
+
+/// Загрузить провайдеров/модели и разложить плоско для QML.
+async fn refresh_models(
+    client: &api::OpenCodeClient,
+    models: &Arc<std::sync::Mutex<String>>,
+) {
+    let v = match client.providers().await {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("providers: {e}");
+            return;
+        }
+    };
+    let mut flat: Vec<serde_json::Value> = Vec::new();
+    if let Some(providers) = v["providers"].as_array() {
+        for p in providers {
+            let pid = p["id"].as_str().unwrap_or("");
+            let pname = p["name"].as_str().unwrap_or(pid);
+            if let Some(models_map) = p["models"].as_object() {
+                let mut entries: Vec<(&String, &serde_json::Value)> = models_map.iter().collect();
+                entries.sort_by(|a, b| a.0.cmp(b.0));
+                for (mid, m) in entries {
+                    let mname = m["name"].as_str().unwrap_or(mid);
+                    flat.push(serde_json::json!({
+                        "providerID": pid,
+                        "providerName": pname,
+                        "modelID": mid,
+                        "modelName": mname,
+                    }));
+                }
+            }
+        }
+    }
+    let json = serde_json::Value::Array(flat).to_string();
+    if let Ok(mut g) = models.lock() {
+        *g = json;
     }
 }
 
@@ -453,5 +652,19 @@ async fn load_history(
 fn set_status(status: &Arc<std::sync::Mutex<String>>, s: &str) {
     if let Ok(mut g) = status.lock() {
         *g = s.to_string();
+    }
+}
+
+/// Опубликовать id текущей сессии для QML (`None` -> пустая строка).
+fn set_current_session(shared: &Arc<std::sync::Mutex<String>>, session: &Option<String>) {
+    if let Ok(mut g) = shared.lock() {
+        *g = session.clone().unwrap_or_default();
+    }
+}
+
+/// Попросить QML переключить страницу карусели (0..3) при следующем polling.
+fn request_nav(nav: &Arc<std::sync::Mutex<i32>>, page: i32) {
+    if let Ok(mut n) = nav.lock() {
+        *n = page;
     }
 }

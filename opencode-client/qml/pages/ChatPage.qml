@@ -7,6 +7,8 @@ Item {
 
     property var appWindow
 
+    readonly property bool busy: appWindow.statusText === "busy"
+
     StatusHeader {
         id: header
         appWindow: chatPage.appWindow
@@ -81,7 +83,7 @@ Item {
 
         IconButton {
             id: mic
-            visible: appWindow.inputMode !== "text"
+            visible: appWindow.inputMode !== "text" && !chatPage.busy
             anchors {
                 left: parent.left
                 leftMargin: Theme.paddingSmall
@@ -93,6 +95,7 @@ Item {
 
         IconButton {
             id: send
+            visible: !chatPage.busy
             anchors {
                 right: parent.right
                 rightMargin: Theme.paddingSmall
@@ -106,18 +109,33 @@ Item {
             }
         }
 
+        IconButton {
+            id: stop
+            visible: chatPage.busy
+            anchors {
+                right: parent.right
+                rightMargin: Theme.paddingSmall
+                verticalCenter: parent.verticalCenter
+            }
+            icon.source: "image://theme/icon-m-stop"
+            onClicked: appWindow.stopAgent()
+        }
+
         TextField {
             id: input
             visible: appWindow.inputMode !== "voice"
+            enabled: !chatPage.busy
             anchors {
                 left: mic.visible ? mic.right : parent.left
-                right: send.left
+                right: chatPage.busy ? stop.left : send.left
                 leftMargin: Theme.paddingSmall
                 rightMargin: Theme.paddingSmall
                 verticalCenter: parent.verticalCenter
             }
-            placeholderText: qsTr("Промпт агенту…")
-            EnterKey.enabled: text.length > 0
+            placeholderText: chatPage.busy
+                             ? qsTr("Агент работает…")
+                             : qsTr("Промпт агенту…")
+            EnterKey.enabled: text.length > 0 && !chatPage.busy
             EnterKey.iconSource: "image://theme/icon-m-enter-accept"
             EnterKey.onClicked: {
                 appWindow.send(input.text)

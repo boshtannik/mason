@@ -32,6 +32,18 @@ pub struct AppBridge {
     /// Команды от QML воркеру: `"new"` | `"open:<sessionID>"`.
     #[allow(dead_code)]
     commands_shared: Arc<Mutex<Vec<String>>>,
+    /// id текущей сессии (пишет воркер, читает QML). Пустая строка — нет сессии.
+    #[allow(dead_code)]
+    current_session_shared: Arc<Mutex<String>>,
+    /// Запрос QML сменить страницу карусели (`take_nav` забирает и очищает; <0 — нет).
+    #[allow(dead_code)]
+    nav_shared: Arc<Mutex<i32>>,
+    /// TODO-задачи текущей сессии (JSON), пишет воркер, читает QML.
+    #[allow(dead_code)]
+    todo_shared: Arc<Mutex<String>>,
+    /// Плоский список моделей (JSON), пишет воркер, читает QML.
+    #[allow(dead_code)]
+    models_shared: Arc<Mutex<String>>,
 
     /// QML: забрать и очистить накопленные сообщения (polling).
     drain_messages: qt_method!(fn drain_messages(&self) -> QString {
@@ -92,6 +104,84 @@ pub struct AppBridge {
             self.push_command(serde_json::json!({ "cmd": "delete", "id": id }));
         }
     }),
+    /// QML: форкнуть сессию (создать ветку).
+    fork_session: qt_method!(fn fork_session(&self, id: QString) {
+        let id = id.to_string();
+        log::info!("QML fork_session {id:?}");
+        if !id.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": "fork", "id": id }));
+        }
+    }),
+    /// QML: поделиться сессией (получить ссылку).
+    share_session: qt_method!(fn share_session(&self, id: QString) {
+        let id = id.to_string();
+        log::info!("QML share_session {id:?}");
+        if !id.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": "share", "id": id }));
+        }
+    }),
+    /// QML: снять доступ по ссылке.
+    unshare_session: qt_method!(fn unshare_session(&self, id: QString) {
+        let id = id.to_string();
+        log::info!("QML unshare_session {id:?}");
+        if !id.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": "unshare", "id": id }));
+        }
+    }),
+    /// QML: суммировать (сжать) историю сессии.
+    summarize_session: qt_method!(fn summarize_session(&self, id: QString) {
+        let id = id.to_string();
+        log::info!("QML summarize_session {id:?}");
+        if !id.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": "summarize", "id": id }));
+        }
+    }),
+    /// QML: прервать выполнение в сессии.
+    abort_session: qt_method!(fn abort_session(&self, id: QString) {
+        let id = id.to_string();
+        log::info!("QML abort_session {id:?}");
+        if !id.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": "abort", "id": id }));
+        }
+    }),
+    /// QML: id текущей сессии (read-only, обновляется воркером).
+    current_session_id: qt_method!(fn current_session_id(&self) -> QString {
+        let v = self.current_session_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+    /// QML: TODO-задачи текущей сессии как JSON (read-only).
+    todo_json: qt_method!(fn todo_json(&self) -> QString {
+        let v = self.todo_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+    /// QML: плоский список моделей как JSON (read-only).
+    models_json: qt_method!(fn models_json(&self) -> QString {
+        let v = self.models_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+    /// QML: переключить модель сессии.
+    set_model: qt_method!(fn set_model(&self, id: QString, provider: QString, model: QString) {
+        let id = id.to_string();
+        let provider = provider.to_string();
+        let model = model.to_string();
+        log::info!("QML set_model {id:?} -> {provider}/{model}");
+        if !id.is_empty() && !provider.is_empty() && !model.is_empty() {
+            self.push_command(serde_json::json!({
+                "cmd": "set_model", "id": id, "provider": provider, "model": model
+            }));
+        }
+    }),
+    /// QML: забрать запрошенную страницу карусели (или -1).
+    take_nav: qt_method!(fn take_nav(&self) -> i32 {
+        self.nav_shared
+            .lock()
+            .map(|mut n| {
+                let v = *n;
+                *n = -1;
+                v
+            })
+            .unwrap_or(-1)
+    }),
 }
 
 /// Доступ из Rust-задач (не из QML, безопасно из любого потока).
@@ -139,6 +229,26 @@ impl AppBridge {
     /// Хэндл очереди команд для воркера.
     pub fn commands_handle(&self) -> Arc<Mutex<Vec<String>>> {
         self.commands_shared.clone()
+    }
+
+    /// Хэндл id текущей сессии для воркера.
+    pub fn current_session_handle(&self) -> Arc<Mutex<String>> {
+        self.current_session_shared.clone()
+    }
+
+    /// Хэндл запроса навигации для воркера.
+    pub fn nav_handle(&self) -> Arc<Mutex<i32>> {
+        self.nav_shared.clone()
+    }
+
+    /// Хэндл TODO-задач для воркера.
+    pub fn todo_handle(&self) -> Arc<Mutex<String>> {
+        self.todo_shared.clone()
+    }
+
+    /// Хэндл списка моделей для воркера.
+    pub fn models_handle(&self) -> Arc<Mutex<String>> {
+        self.models_shared.clone()
     }
 
     /// Положить JSON-команду в очередь для воркера.

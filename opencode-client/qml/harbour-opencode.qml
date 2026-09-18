@@ -9,6 +9,9 @@ ApplicationWindow {
     property string statusText: "connecting"
     property string inputMode: "text_ptt"
     property var sessions: []
+    property var todos: []
+    property var models: []
+    property string currentSessionId: ""
     property bool showTools: true
     property string pttPosition: "left"
     property string ttsMode: "text"
@@ -52,6 +55,28 @@ ApplicationWindow {
                 console.log("sessions parse error: " + e)
             }
         }
+        var t = bridge.todo_json()
+        if (t !== "" && t !== undefined) {
+            try {
+                app.todos = JSON.parse(t)
+            } catch (e) {
+                console.log("todo parse error: " + e)
+            }
+        }
+        var md = bridge.models_json()
+        if (md !== "" && md !== undefined) {
+            try {
+                app.models = JSON.parse(md)
+            } catch (e) {
+                console.log("models parse error: " + e)
+            }
+        }
+        var cid = bridge.current_session_id()
+        if (cid !== undefined && cid !== null && cid !== app.currentSessionId)
+            app.currentSessionId = cid
+        var nav = bridge.take_nav()
+        if (nav !== undefined && nav >= 0)
+            app.requestPage(nav)
     }
 
     function statusColor(s) {
@@ -101,6 +126,22 @@ ApplicationWindow {
 
     function deleteSession(id) {
         bridge.delete_session(id)
+    }
+
+    function forkSession(id) {
+        app.messages = []
+        app.currentSessionId = ""
+        bridge.fork_session(id)
+    }
+
+    function shareSession(id) { bridge.share_session(id) }
+    function unshareSession(id) { bridge.unshare_session(id) }
+    function summarizeSession(id) { bridge.summarize_session(id) }
+    function abortSession(id) { bridge.abort_session(id) }
+    function setModel(id, provider, model) { bridge.set_model(id, provider, model) }
+    function stopAgent() {
+        if (app.currentSessionId !== "")
+            app.abortSession(app.currentSessionId)
     }
 
     initialPage: Component {
