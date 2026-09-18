@@ -1,11 +1,23 @@
 import QtQuick 2.6
 import Sailfish.Silica 1.0
+import "pages"
 
 ApplicationWindow {
     id: app
 
     property var messages: []
     property string statusText: "connecting"
+    property string inputMode: "text_ptt"
+    property var sessions: []
+    property bool showTools: true
+    property string pttPosition: "left"
+    property string ttsMode: "text"
+    property bool soundOnFinish: true
+    property bool soundOnPermission: true
+    property bool sendImmediately: false
+    property string uiLanguage: "ru"
+    property bool sttModelReady: false
+    property bool ttsModelReady: false
 
     Timer {
         id: pollTimer
@@ -45,105 +57,61 @@ ApplicationWindow {
         var t = ("" + text).trim()
         if (t === "")
             return
-        app.messages = app.messages.concat(">>> " + t)
+        var acc = app.messages
+        acc = acc.concat(">>> " + t)
+        app.messages = acc
         bridge.send_prompt(t)
     }
 
+    function clearHistory() { app.messages = [] }
+    function startPtt() { console.log("PTT: not implemented yet") }
+    function newSession() { console.log("newSession: TODO") }
+    function openSession(id) { console.log("openSession: " + id) }
+
     initialPage: Component {
         Page {
-            id: page
+            // Карусель: [0] Global | [1] Sessions | [2] Chat | [3] Session
+            // PagedView даёт снап и горизонтальный свайп (snapMode у Flickable — баг, см. память).
+            PagedView {
+                id: pager
+                anchors.fill: parent
+                currentIndex: 2
+                model: [globalPage, sessionsPage, chatPage, sessionSettingsPage]
 
-            SilicaListView {
-                id: chatList
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                    top: parent.top
-                    bottom: inputPanel.top
-                }
-                model: app.messages
-                clip: true
-                spacing: Theme.paddingSmall
+                delegate: Item {
+                    width: PagedView.contentWidth
+                    height: PagedView.contentHeight
 
-                header: Item {
-                    width: chatList.width
-                    height: Theme.itemSizeExtraSmall
-
-                    Row {
-                        anchors {
-                            left: parent.left
-                            leftMargin: Theme.horizontalPageMargin
-                            verticalCenter: parent.verticalCenter
-                        }
-                        spacing: Theme.paddingSmall
-
-                        Label {
-                            text: "●"
-                            color: app.statusColor(app.statusText)
-                            font.pixelSize: Theme.fontSizeSmall
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        Label {
-                            text: "opencode — " + app.statusText
-                            color: Theme.secondaryColor
-                            font.pixelSize: Theme.fontSizeExtraSmall
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
+                    Loader {
+                        anchors.fill: parent
+                        sourceComponent: modelData
                     }
                 }
 
-                delegate: Label {
-                    x: Theme.horizontalPageMargin
-                    width: chatList.width - 2 * Theme.horizontalPageMargin
-                    text: modelData
-                    wrapMode: Text.Wrap
-                    font.pixelSize: Theme.fontSizeSmall
-                    color: Theme.primaryColor
-                }
-
-                onCountChanged: positionViewAtEnd()
-
-                VerticalScrollDecorator {}
+                Component { id: globalPage; GlobalSettingsPage { appWindow: app } }
+                Component { id: sessionsPage; SessionsPage { appWindow: app } }
+                Component { id: chatPage; ChatPage { appWindow: app } }
+                Component { id: sessionSettingsPage; SessionSettingsPage { appWindow: app } }
             }
 
-            Item {
-                id: inputPanel
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                    bottom: parent.bottom
-                }
-                height: input.height + Theme.paddingMedium
+            // Индикатор точками (в SFOS 5.1 готового PageIndicator нет — рисуем сами).
+            Row {
+                id: dots
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.topMargin: Theme.paddingMedium
+                spacing: Theme.paddingSmall
+                visible: pager.count > 1
+                opacity: pager.dragging ? 1.0 : Theme.opacityHigh
+                z: 10
 
-                Row {
-                    anchors {
-                        left: parent.left
-                        right: parent.right
-                        verticalCenter: parent.verticalCenter
-                        leftMargin: Theme.paddingSmall
-                        rightMargin: Theme.paddingSmall
-                    }
-                    spacing: Theme.paddingSmall
-
-                    TextField {
-                        id: input
-                        width: parent.width - sendButton.width - Theme.paddingSmall
-                        placeholderText: qsTr("Промпт агенту…")
-                        EnterKey.enabled: text.length > 0
-                        EnterKey.iconSource: "image://theme/icon-m-enter-accept"
-                        EnterKey.onClicked: {
-                            app.send(input.text)
-                            input.text = ""
-                        }
-                    }
-
-                    Button {
-                        id: sendButton
-                        text: "→"
-                        onClicked: {
-                            app.send(input.text)
-                            input.text = ""
-                        }
+                Repeater {
+                    model: pager.count
+                    Rectangle {
+                        width: Theme.paddingSmall
+                        height: width
+                        radius: width / 2
+                        color: index === pager.currentIndex ? Theme.primaryColor : Theme.secondaryColor
                     }
                 }
             }
