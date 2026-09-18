@@ -5,6 +5,7 @@ ApplicationWindow {
     id: app
 
     property var messages: []
+    property string statusText: "connecting"
 
     Timer {
         id: pollTimer
@@ -15,6 +16,9 @@ ApplicationWindow {
     }
 
     function poll() {
+        var st = bridge.status_text()
+        if (st !== undefined && st !== "")
+            app.statusText = st
         var msgs = bridge.drain_messages()
         if (msgs === "" || msgs === undefined)
             return
@@ -25,6 +29,16 @@ ApplicationWindow {
                 acc = acc.concat(lines[i])
         }
         app.messages = acc
+    }
+
+    function statusColor(s) {
+        switch (s) {
+        case "connecting": return "#2196f3"
+        case "idle":       return "#4caf50"
+        case "busy":       return "#ffc107"
+        case "error":      return "#f44336"
+        default:           return Theme.secondaryColor
+        }
     }
 
     function send(text) {
@@ -51,14 +65,31 @@ ApplicationWindow {
                 clip: true
                 spacing: Theme.paddingSmall
 
-                header: Label {
-                    x: Theme.horizontalPageMargin
-                    width: chatList.width - 2 * Theme.horizontalPageMargin
-                    text: "● opencode — " + bridge.session_status
-                    color: bridge.session_status === "error"
-                           ? Theme.errorColor : Theme.highlightColor
-                    font.pixelSize: Theme.fontSizeExtraSmall
-                    truncationMode: TruncationMode.Fade
+                header: Item {
+                    width: chatList.width
+                    height: Theme.itemSizeExtraSmall
+
+                    Row {
+                        anchors {
+                            left: parent.left
+                            leftMargin: Theme.horizontalPageMargin
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: Theme.paddingSmall
+
+                        Label {
+                            text: "●"
+                            color: app.statusColor(app.statusText)
+                            font.pixelSize: Theme.fontSizeSmall
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Label {
+                            text: "opencode — " + app.statusText
+                            color: Theme.secondaryColor
+                            font.pixelSize: Theme.fontSizeExtraSmall
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
                 }
 
                 delegate: Label {

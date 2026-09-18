@@ -47,6 +47,9 @@ impl ServerGuard {
     /// Запускает `opencode serve`, читает из лога назначенный порт,
     /// ждёт health-ответа и возвращает готовый guard (RAII).
     pub async fn start(cfg: ServerConfig) -> Result<Self, String> {
+        // Сначала прибираем наши сироты от прошлых аварийных запусков.
+        reap_orphans();
+
         let bin = resolve_bin(cfg.bin);
         info!("PATH={:?}, opencode bin={:?}", std::env::var("PATH"), bin);
 
@@ -62,6 +65,9 @@ impl ServerGuard {
         let mut child = cmd.spawn().map_err(|e| {
             format!("не удалось запустить `{}`: {e}", bin.display())
         })?;
+        // Запоминаем свой PID: только эти процессы мы вправе останавливать.
+        let pid = child.id();
+        register_spawn(pid);
 
         // std::sync::mpsc — меж-поточный, без tokio runtime.
         let (tx, rx) = mpsc::channel::<String>();
@@ -82,6 +88,7 @@ impl ServerGuard {
         for _i in 0..MAX_ATTEMPTS {
             match child.try_wait() {
                 Ok(Some(status)) => {
+                    unregister_spawn(pid);
                     return Err(format!("opencode serve умер: {status}"));
                 }
                 Ok(None) => {}
@@ -103,6 +110,7 @@ impl ServerGuard {
             Some(p) => p,
             None => {
                 let _ = child.kill();
+                unregister_spawn(pid);
                 return Err("opencode serve не сообщил порт за 5s".into());
             }
         };
@@ -128,6 +136,7 @@ impl ServerGuard {
         }
         if !ready {
             let _ = child.kill();
+            unregister_spawn(pid);
             return Err(format!("opencode serve не ответил на health: {base}"));
         }
 
@@ -162,15 +171,143 @@ impl ServerGuard {
 impl Drop for ServerGuard {
     fn drop(&mut self) {
         if let Some(mut child) = self.child.lock().unwrap().take() {
-            info!("останавливаю opencode serve (pid={})", child.id());
+            let pid = child.id();
+            info!("останавливаю opencode serve (pid={pid})");
             match child.kill() {
                 Ok(_) => {
                     let _ = child.wait();
                 }
                 Err(e) => error!("не смог остановить opencode serve: {e}"),
             }
+            unregister_spawn(pid);
         }
     }
+}
+
+// --- Учёт поднятых нами `opencode serve` ----------------------------------
+//
+// mapplauncherd-booster иногда убивает приложение так, что `Drop` не
+// выполняется, и `opencode serve` остаётся висеть сиротой. Чтобы при
+// следующем старте прибрать ИМЕННО СВОИ процессы (и никогда не тронуть
+// `opencode`, запущенный пользователем из терминала), ведём реестр:
+//   pid + время старта из /proc/<pid>/stat (защита от переиспользования PID).
+// Файл: $XDG_DATA_HOME/harbour-opencode/spawned-servers.tsv
+
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
+const SIGTERM: i32 = 15;
+const SIGKILL: i32 = 9;
+
+fn registry_path() -> std::path::PathBuf {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|h| std::path::PathBuf::from(h).join(".local/share"))
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+    base.join("harbour-opencode").join("spawned-servers.tsv")
+}
+
+/// Поле 22 `starttime` из /proc/<pid>/stat (в тиках). `None`, если процесса нет.
+fn proc_start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // comm заключён в скобки и может содержать ')' — режем по ПОСЛЕДНЕЙ ')'.
+    let after = stat.rsplit_once(')')?.1;
+    // После comm поле state — это 3-е поле, значит starttime (22) — 20-е здесь.
+    after.split_whitespace().nth(19)?.parse().ok()
+}
+
+fn proc_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Действительно ли по PID сейчас `opencode ... serve` (доп. страховка).
+fn is_opencode_serve(pid: u32) -> bool {
+    match std::fs::read(format!("/proc/{pid}/cmdline")) {
+        Ok(bytes) => {
+            let s = String::from_utf8_lossy(&bytes).replace('\0', " ");
+            s.contains("opencode") && s.contains("serve")
+        }
+        Err(_) => false,
+    }
+}
+
+fn kill_pid(pid: u32) {
+    for sig in [SIGTERM, SIGKILL] {
+        unsafe { kill(pid as i32, sig) };
+        for _ in 0..10 {
+            if !proc_alive(pid) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+fn read_registry() -> Vec<(u32, u64)> {
+    std::fs::read_to_string(registry_path())
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+        })
+        .collect()
+}
+
+fn write_registry(records: &[(u32, u64)]) {
+    let path = registry_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let body: String = records.iter().map(|(p, t)| format!("{p} {t}\n")).collect();
+    let _ = std::fs::write(path, body);
+}
+
+fn register_spawn(pid: u32) {
+    if let Some(start) = proc_start_time(pid) {
+        let mut rec = read_registry();
+        rec.retain(|(p, _)| *p != pid);
+        rec.push((pid, start));
+        write_registry(&rec);
+    }
+}
+
+fn unregister_spawn(pid: u32) {
+    let mut rec = read_registry();
+    let before = rec.len();
+    rec.retain(|(p, _)| *p != pid);
+    if rec.len() != before {
+        write_registry(&rec);
+    }
+}
+
+/// Останавливает только НАШИ осиротевшие серверы из реестра.
+fn reap_orphans() {
+    let records = read_registry();
+    if records.is_empty() {
+        return;
+    }
+    let mut alive = Vec::new();
+    for (pid, start) in records {
+        // Мёртвый или переиспользованный PID — просто забываем.
+        if proc_start_time(pid) != Some(start) {
+            continue;
+        }
+        if is_opencode_serve(pid) {
+            info!("подчищаю осиротевший opencode serve (pid={pid})");
+            kill_pid(pid);
+        } else {
+            debug!("pid={pid} из реестра уже не opencode serve — не трогаю");
+        }
+        if proc_alive(pid) {
+            alive.push((pid, start));
+        }
+    }
+    write_registry(&alive);
 }
 
 /// Ищет бинарь opencode: явный путь → OPENCODE_BIN → стандартные места → PATH.

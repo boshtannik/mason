@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::ffi::CStr;
+use std::io::Write as _;
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
@@ -20,9 +21,40 @@ const APP_NAME: &str = "harbour-opencode";
 /// Сколько ждём готовности opencode serve перед показом окна.
 const SERVER_WAIT: Duration = Duration::from_secs(12);
 
+/// Логгер пишет и в stderr, и в файл `~/.cache/harbour-opencode/app.log`
+/// (при запуске через booster stdout наследуется и теряется).
+struct Tee(std::fs::File);
+
+impl std::io::Write for Tee {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::stderr().write_all(buf);
+        self.0.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        let _ = std::io::stderr().flush();
+        self.0.flush()
+    }
+}
+
+/// Инициализация логов: `RUST_LOG` (по умолчанию `info`) + файл в кэше приложения.
+fn init_logging() {
+    let mut builder = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info"),
+    );
+    if let Some(home) = std::env::var_os("HOME") {
+        let dir = std::path::PathBuf::from(home).join(".cache/harbour-opencode");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("app.log");
+        if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            builder.target(env_logger::Target::Pipe(Box::new(Tee(file))));
+        }
+    }
+    let _ = builder.try_init();
+    log::info!("--- harbour-opencode starting (pid={}) ---", std::process::id());
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::try_init().ok();
-    log::info!("harbour-opencode starting");
+    init_logging();
 
     // Мост QML ←→ Rust (создаём до Qt, чтобы отдать очереди воркеру).
     qml_register_type::<AppBridge>(
@@ -34,6 +66,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bridge = RefCell::new(AppBridge::default());
     let bridge_pinned = unsafe { QObjectPinned::new(&bridge) };
     let (pending, prompts) = bridge_pinned.borrow().queues();
+    let status = bridge_pinned.borrow().status_handle();
+    bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
 
@@ -49,6 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (user, pw)
     });
 
+    let worker_status = status.clone();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -67,23 +102,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
             let _ = url_tx.send(base.clone());
-            if let Some(base) = base {
-                run_worker(base, env_auth, dispatcher, pending, prompts).await;
+            match base {
+                Some(base) => run_worker(base, env_auth, dispatcher, pending, prompts, worker_status).await,
+                None => set_status(&worker_status, "error"),
             }
             drop(guard);
         });
     });
 
-    let has_server = match url_rx.recv_timeout(SERVER_WAIT) {
-        Ok(Some(_)) => true,
-        _ => {
-            log::warn!("opencode serve не готов за {:?} — стартуем в offline", SERVER_WAIT);
-            false
-        }
-    };
-    bridge_pinned.borrow_mut().set_session_status_rs(
-        if has_server { "connecting" } else { "error" }.to_string(),
-    );
+    if url_rx.recv_timeout(SERVER_WAIT).ok().flatten().is_none() {
+        log::warn!("opencode serve не готов за {:?} — стартуем в offline", SERVER_WAIT);
+        set_status(&status, "error");
+    }
 
     // QML в главном потоке; exec() блокирует до закрытия окна.
     let mut app = QmlApp::application(APP_NAME.to_string());
@@ -103,18 +133,43 @@ async fn run_worker(
     dispatcher: event::dispatcher::SharedState,
     worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
     worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    status: Arc<std::sync::Mutex<String>>,
 ) {
+    loop {
+        match run_stream(
+            base.clone(),
+            auth.clone(),
+            dispatcher.clone(),
+            worker_pending.clone(),
+            worker_prompts.clone(),
+            status.clone(),
+        )
+        .await
+        {
+            Ok(()) => log::warn!("SSE поток завершился, переподключаюсь…"),
+            Err(e) => log::error!("SSE ошибка: {e}, переподключаюсь…"),
+        }
+        set_status(&status, "connecting");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// Одна SSE-сессия: `Ok(())` — поток закончился, `Err` — не удалось подключиться.
+async fn run_stream(
+    base: String,
+    auth: Option<(String, String)>,
+    dispatcher: event::dispatcher::SharedState,
+    worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
+    worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    status: Arc<std::sync::Mutex<String>>,
+) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
 
     let sse = event::sse::SseClient::new(base, auth);
     log::info!("подключаюсь к /global/event...");
-    let mut stream = match sse.stream().await {
-        Ok(s) => s,
-        Err(e) => {
-            log::error!("sse connect: {e}");
-            return;
-        }
-    };
+    let mut stream = sse.stream().await?;
+    log::info!("SSE подключён");
+    set_status(&status, "idle");
 
     // Копим текст ответов по part.id (см. example full_cycle).
     let mut parts: std::collections::HashMap<String, String> = Default::default();
@@ -128,6 +183,18 @@ async fn run_worker(
             item = stream.next() => {
                 match item {
                     Some(Ok(ev)) => {
+                        if let opencode_client::types::event::Event::SessionError { properties } = &ev.payload {
+                            let msg = properties
+                                .error
+                                .as_ref()
+                                .map(|e| e.to_string())
+                                .unwrap_or_default();
+                            log::error!("session.error: {msg}");
+                            if let Ok(mut q) = worker_pending.lock() {
+                                q.push(format!("[ошибка сервера] {msg}"));
+                            }
+                            set_status(&status, "error");
+                        }
                         let mut st = dispatcher.lock().await;
                         let changed = event::dispatcher::dispatch(&ev.payload, &mut st).await;
                         drop(st);
@@ -150,6 +217,7 @@ async fn run_worker(
                                         q.push(text);
                                     }
                                 }
+                                set_status(&status, "idle");
                                 parts.clear();
                                 current_session = None;
                             }
@@ -157,25 +225,38 @@ async fn run_worker(
                         let _ = changed;
                     }
                     Some(Err(e)) => log::error!("sse error: {e}"),
-                    None => { log::info!("SSE закрылся"); return; }
+                    None => {
+                        log::error!("SSE закрылся");
+                        set_status(&status, "error");
+                        return Ok(());
+                    }
                 }
             }
             _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
                 for prompt in worker_prompts.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
                     log::info!("QML промпт: {prompt}");
+                    set_status(&status, "busy");
                     // Создаём сессию если ещё нет.
                     if current_session.is_none() {
                         match client.create_session().await {
-                            Ok(sess) => {
-                                if let Some(id) = sess["id"].as_str() {
-                                    current_session = Some(id.to_string());
+                            Ok(sess) => match sess["id"].as_str() {
+                                Some(id) => current_session = Some(id.to_string()),
+                                None => {
+                                    let msg = format!("в ответе нет session.id: {sess}");
+                                    log::error!("{msg}");
+                                    if let Ok(mut q) = worker_pending.lock() {
+                                        q.push(format!("[ошибка сессии] {msg}"));
+                                    }
+                                    set_status(&status, "error");
+                                    continue;
                                 }
-                            }
+                            },
                             Err(e) => {
                                 log::error!("create_session: {e}");
                                 if let Ok(mut q) = worker_pending.lock() {
                                     q.push(format!("[ошибка сессии] {e}"));
                                 }
+                                set_status(&status, "error");
                                 continue;
                             }
                         }
@@ -186,10 +267,18 @@ async fn run_worker(
                             if let Ok(mut q) = worker_pending.lock() {
                                 q.push(format!("[ошибка промпта] {e}"));
                             }
+                            set_status(&status, "error");
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/// Потокобезопасно выставить статус для QML (без Qt-сигналов).
+fn set_status(status: &Arc<std::sync::Mutex<String>>, s: &str) {
+    if let Ok(mut g) = status.lock() {
+        *g = s.to_string();
     }
 }

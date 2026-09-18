@@ -22,19 +22,34 @@ pub struct AppBridge {
     /// Очередь исходящих промптов (QML → воркер).
     #[allow(dead_code)]
     outgoing_prompts: Arc<Mutex<Vec<String>>>,
+    /// Статус, который пишет воркер (не-Qt-поток) и читает QML через polling.
+    /// Qt-сигналы из чужих потоков не эмитим — поэтому отдельный Arc.
+    #[allow(dead_code)]
+    status_shared: Arc<Mutex<String>>,
 
     /// QML: забрать и очистить накопленные сообщения (polling).
-    drain_messages: qt_method!(fn drain_messages(&self) -> String {
-        self.pending_messages.lock().map(|mut q| std::mem::take(&mut *q).join("\n")).unwrap_or_default()
+    drain_messages: qt_method!(fn drain_messages(&self) -> QString {
+        let out = self
+            .pending_messages
+            .lock()
+            .map(|mut q| std::mem::take(&mut *q).join("\n"))
+            .unwrap_or_default();
+        QString::from(out)
     }),
     /// QML: принять промпт от пользователя.
-    send_prompt: qt_method!(fn send_prompt(&self, text: String) {
-        let t = text.trim().to_string();
+    send_prompt: qt_method!(fn send_prompt(&self, text: QString) {
+        let t = text.to_string().trim().to_string();
+        log::info!("QML send_prompt -> {t:?}");
         if !t.is_empty() {
             if let Ok(mut q) = self.outgoing_prompts.lock() {
                 q.push(t);
             }
         }
+    }),
+    /// QML: текущий статус (read-only, обновляется воркером).
+    status_text: qt_method!(fn status_text(&self) -> QString {
+        let v = self.status_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
     }),
 }
 
@@ -61,5 +76,17 @@ impl AppBridge {
     /// Клоны очередей для передачи в tokio-воркер (Send + 'static).
     pub fn queues(&self) -> (Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<String>>>) {
         (self.pending_messages.clone(), self.outgoing_prompts.clone())
+    }
+
+    /// Хэндл статуса для воркера (можно писать из любого потока).
+    pub fn status_handle(&self) -> Arc<Mutex<String>> {
+        self.status_shared.clone()
+    }
+
+    /// Потокобезопасно выставить статус (без Qt-сигналов).
+    pub fn set_status_shared(&self, s: &str) {
+        if let Ok(mut g) = self.status_shared.lock() {
+            *g = s.to_string();
+        }
     }
 }
