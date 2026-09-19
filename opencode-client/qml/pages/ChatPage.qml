@@ -130,8 +130,12 @@ Item {
             visible: appWindow.inputMode !== "voice"
             enabled: !chatPage.busy
             anchors {
-                left: mic.visible ? mic.right : parent.left
-                right: chatPage.busy ? stop.left : send.left
+                left: chatPage.micRight
+                      ? parent.left
+                      : (mic.visible ? mic.right : parent.left)
+                right: chatPage.busy
+                       ? stop.left
+                       : (chatPage.micRight ? mic.left : send.left)
                 leftMargin: Theme.paddingSmall
                 rightMargin: Theme.paddingSmall
                 verticalCenter: parent.verticalCenter

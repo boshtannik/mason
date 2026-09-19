@@ -36,7 +36,7 @@ ApplicationWindow {
 
     // Голосовой модуль: статус из воркера (`voice_status_json`).
     property var voiceModels: []
-    property variant voiceLangOptions: ["auto"]
+    property variant voiceLangOptions: [ { id: "auto", name: "Auto (detect)" } ]
     property string chosenStt: ""
     property string chosenTts: ""
     property string voiceLang: "auto"
@@ -155,8 +155,10 @@ ApplicationWindow {
                 app.chosenStt = vo.stt || ""
                 app.chosenTts = vo.tts || ""
                 app.voiceLang = vo.lang || "auto"
-                if (vo.langs && vo.langs.length)
-                    app.voiceLangOptions = ["auto"].concat(vo.langs)
+                if (vo.langs && vo.langs.length) {
+                    var opts = [{ id: "auto", name: qsTr("Auto (detect)") }]
+                    app.voiceLangOptions = opts.concat(vo.langs)
+                }
             } catch (e) {
                 console.log("voice parse error: " + e)
             }

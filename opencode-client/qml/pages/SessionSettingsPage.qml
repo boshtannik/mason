@@ -76,7 +76,7 @@ Item {
 
     SilicaFlickable {
         anchors.fill: parent
-        contentHeight: column.height + Theme.paddingLarge
+        contentHeight: pageHeader.height + column.height + Theme.paddingLarge
 
         PageHeader {
             id: pageHeader

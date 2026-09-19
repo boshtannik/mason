@@ -107,7 +107,14 @@ impl VoiceState {
             .as_array()
             .map(|a| {
                 a.iter()
-                    .filter_map(|l| l["id"].as_str().map(|s| Value::String(s.to_string())))
+                    .filter_map(|l| {
+                        let id = l["id"].as_str()?;
+                        let name = l["name_en"]
+                            .as_str()
+                            .or_else(|| l["name"].as_str())
+                            .unwrap_or(id);
+                        Some(serde_json::json!({ "id": id, "name": name }))
+                    })
                     .collect()
             })
             .unwrap_or_default();

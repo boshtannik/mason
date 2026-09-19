@@ -34,7 +34,7 @@ export SB2_RUST_TARGET_TRIPLE=aarch64-unknown-linux-gnu
 export CC_aarch64_unknown_linux_gnu=aarch64-meego-linux-gnu-gcc
 export CXX_aarch64_unknown_linux_gnu=aarch64-meego-linux-gnu-g++
 export AR_aarch64_unknown_linux_gnu=aarch64-meego-linux-gnu-ar
-cargo build --release -j 1
+cargo build -j 1
 
 # whisper.cpp: статический бинарник whisper-cli (STT). Сборка без OpenBLAS/COREML.
 cd ../third_party/whisper.cpp
@@ -49,7 +49,7 @@ ls -l main
 # - INSTALL --------------------------------------------------------------------
 %install
 rm -rf %{buildroot}
-install -Dm 755 opencode-client/target/aarch64-unknown-linux-gnu/release/harbour-opencode -t %{buildroot}%{_bindir}
+install -Dm 755 opencode-client/target/aarch64-unknown-linux-gnu/debug/harbour-opencode -t %{buildroot}%{_bindir}
 install -Dm 755 third_party/whisper.cpp/main %{buildroot}%{_libexecdir}/%{name}/whisper-cli
 install -Dm 644 opencode-client/assets/models.json -t %{buildroot}%{_datadir}/%{name}
 install -Dm 644 harbour-opencode.png -t %{buildroot}%{_datadir}/icons/hicolor/86x86/apps
@@ -63,7 +63,7 @@ desktop-file-install --delete-original    \
 
 # - CHECK ----------------------------------------------------------------------
 %check
-if nm -D opencode-client/target/aarch64-unknown-linux-gnu/release/harbour-opencode | grep " T main$" > /dev/null ; then
+if nm -D opencode-client/target/aarch64-unknown-linux-gnu/debug/harbour-opencode | grep " T main$" > /dev/null ; then
   echo "main symbol exists"
 else
   echo "main symbol is missing"
