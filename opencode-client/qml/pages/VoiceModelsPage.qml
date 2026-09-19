@@ -65,7 +65,9 @@ Page {
 
     function rowSub(m) {
         var s = vmPage.langName(m.lang_id) + " · " + appWindow.humanSize(m.size)
-        if (m.downloaded)
+        if (m.state === "error")
+            s += " · " + qsTr("download failed")
+        else if (m.downloaded)
             s += " · " + qsTr("downloaded")
         return s
     }
@@ -73,6 +75,8 @@ Page {
     function glyph(m) {
         if (m.state === "downloading")
             return "✕"
+        if (m.state === "error")
+            return "!"
         if (vmPage.isSelected(m))
             return "✓"
         if (m.downloaded)
@@ -81,7 +85,7 @@ Page {
     }
 
     function glyphColor(m) {
-        if (m.state === "downloading")
+        if (m.state === "downloading" || m.state === "error")
             return Theme.secondaryColor
         if (vmPage.isSelected(m))
             return Theme.highlightColor

@@ -5,6 +5,7 @@
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub const CATALOG_PATH: &str = "/usr/share/harbour-opencode/models.json";
 pub const WHISPER_BIN: &str = "/usr/libexec/harbour-opencode/whisper-cli";
@@ -157,7 +158,12 @@ fn model_file(m: &Value) -> Option<PathBuf> {
 }
 
 /// Скачать модель: все файлы из `urls` (и `sups[*].urls`) в `models/{id}/`.
-pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
+pub async fn download_model(
+    voice: &Arc<VoiceState>,
+    id: &str,
+    cat: &Value,
+    pending: &Arc<std::sync::Mutex<Vec<String>>>,
+) {
     let m = cat["models"]
         .as_array()
         .and_then(|a| a.iter().find(|x| x["model_id"].as_str() == Some(id)));
@@ -165,6 +171,7 @@ pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
         log::warn!("модель {id} не найдена в каталоге");
         return;
     };
+    let name = m["name"].as_str().unwrap_or(id);
     let expected: u64 = m["size"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0);
     {
         let mut dl = voice.dl.lock().unwrap();
@@ -177,6 +184,7 @@ pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
         let mut c = voice.cancel_dl.lock().unwrap();
         *c = false;
     }
+    log::info!("скачивание {id}: старт (размер={expected})");
     voice.refresh_status();
 
     let mut urls: Vec<String> = m["urls"]
@@ -253,6 +261,7 @@ pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
             }
         };
         let mut fail = false;
+        let mut last_refresh = Instant::now();
         while let Some(chunk) = stream.next().await {
             if let Ok(mut c) = voice.cancel_dl.lock() {
                 if *c {
@@ -269,6 +278,11 @@ pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
                     }
                     if let Ok(mut dl) = voice.dl.lock() {
                         dl.done += c.len() as u64;
+                    }
+                    // Раз в ~250 мс публикуем прогресс, чтобы QML видел % вживую.
+                    if last_refresh.elapsed() >= Duration::from_millis(250) {
+                        last_refresh = Instant::now();
+                        voice.refresh_status();
                     }
                 }
                 Err(e) => {
@@ -309,6 +323,13 @@ pub async fn download_model(voice: &Arc<VoiceState>, id: &str, cat: &Value) {
             } else {
                 "error".to_string()
             };
+            if let Ok(mut q) = pending.lock() {
+                if dl.state == "done" {
+                    q.push(format!("[голос] «{name}» скачана"));
+                } else {
+                    q.push(format!("[голос] ошибка скачивания «{name}»"));
+                }
+            }
         }
     }
     voice.refresh_status();
@@ -510,9 +531,18 @@ pub async fn run_command(
                 } else {
                     let cat = load_catalog();
                     let voice2 = voice.clone();
+                    let pending2 = pending.clone();
                     let id = id.to_string();
+                    let name = cat["models"]
+                        .as_array()
+                        .and_then(|a| a.iter().find(|x| x["model_id"].as_str() == Some(id.as_str())))
+                        .and_then(|x| x["name"].as_str().map(|s| s.to_string()))
+                        .unwrap_or_else(|| id.clone());
+                    if let Ok(mut q) = pending.lock() {
+                        q.push(format!("[голос] скачивание «{name}»…"));
+                    }
                     tokio::spawn(async move {
-                        download_model(&voice2, &id, &cat).await;
+                        download_model(&voice2, &id, &cat, &pending2).await;
                     });
                 }
             }
