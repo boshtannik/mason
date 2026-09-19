@@ -12,13 +12,55 @@ pub const WHISPER_BIN: &str = "/usr/libexec/harbour-opencode/whisper-cli";
 const MODELS_SUBDIR: &str = "harbour-opencode/models";
 const REC_RAW: &str = "/tmp/harbour-opencode-ptt.pcm";
 
+/// Имена голосовых команд протокола QML <-> воркер (зеркалят harbour-opencode.qml).
+pub mod cmd {
+    pub const LANG: &str = "voice_lang";
+    pub const SELECT_STT: &str = "voice_select_stt";
+    pub const SELECT_TTS: &str = "voice_select_tts";
+    pub const DOWNLOAD: &str = "voice_download";
+    pub const DOWNLOAD_CANCEL: &str = "voice_download_cancel";
+    pub const DELETE: &str = "voice_delete";
+    pub const RECORD_START: &str = "voice_record_start";
+    pub const RECORD_STOP: &str = "voice_record_stop";
+    pub const STT: &str = "voice_stt";
+}
+
+/// Движки моделей (ключи каталога models.json).
+pub mod engine {
+    pub const STT_WHISPER: &str = "stt_whisper";
+    pub const TTS_PIPER: &str = "tts_piper";
+}
+
+/// Фаза скачивания/состояние модели (сериализуется в status JSON для QML).
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    #[default]
+    None,
+    Downloading,
+    Done,
+    Error,
+    Ready,
+}
+
+impl Phase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Phase::None => "",
+            Phase::Downloading => "downloading",
+            Phase::Done => "done",
+            Phase::Error => "error",
+            Phase::Ready => "ready",
+        }
+    }
+}
+
 /// Прогресс текущего скачивания + состояния моделей.
 #[derive(Default, Clone)]
 pub struct DlState {
     pub id: String,
     pub total: u64,
     pub done: u64,
-    pub state: String, // "" | "downloading" | "done" | "error"
+    pub state: Phase,
 }
 
 /// Общее состояние голосового модуля (шарено с воркером и QML).
@@ -71,18 +113,10 @@ impl VoiceState {
                 let id = m["model_id"].as_str()?;
                 let dir = model_dir(id);
                 let total: u64 = m["size"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0);
-                let got = if dir.is_dir() && total > 0 {
-                    let sum: u64 = std::fs::read_dir(&dir)
-                        .map(|rd| {
-                            rd.flatten()
-                                .map(|e| e.path().metadata().map(|md| md.len()).unwrap_or(0))
-                                .sum()
-                        })
-                        .unwrap_or(0);
-                    sum >= total
-                } else {
-                    false
-                };
+                // Модель «на месте», если на диске присутствуют все файлы каталога
+                // (на счётчик байтов не полагаемся: `size` может описывать больше,
+                // чем реально качаем — из-за этого был ложный «download failed»).
+                let got = all_present(&dir, &model_files(m));
                 let mut o = serde_json::Map::new();
                 o.insert("model_id".into(), Value::String(id.to_string()));
                 o.insert("name".into(), m["name"].clone());
@@ -91,11 +125,11 @@ impl VoiceState {
                 o.insert("size".into(), m["size"].clone());
                 o.insert("downloaded".into(), Value::Bool(got));
                 let state = if got {
-                    "ready".to_string()
+                    Phase::Ready.as_str().to_string()
                 } else if dl.id == id {
-                    dl.state.clone()
+                    dl.state.as_str().to_string()
                 } else {
-                    "none".to_string()
+                    Phase::None.as_str().to_string()
                 };
                 o.insert("state".into(), Value::String(state));
                 if dl.id == id {
@@ -157,6 +191,32 @@ fn model_file(m: &Value) -> Option<PathBuf> {
     Some(model_dir(id).join(name))
 }
 
+/// Все имена файлов модели (urls + sups[*].urls): по ним решаем, скачана ли она.
+fn model_files(m: &Value) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut add = |urls: &Value| {
+        if let Some(a) = urls.as_array() {
+            for u in a.iter().filter_map(|u| u.as_str()) {
+                let n = u.rsplit('/').next().unwrap_or("file").to_string();
+                if !names.contains(&n) {
+                    names.push(n);
+                }
+            }
+        }
+    };
+    add(&m["urls"]);
+    if let Some(sups) = m["sups"].as_array() {
+        for s in sups {
+            add(&s["urls"]);
+        }
+    }
+    names
+}
+
+fn all_present(dir: &Path, names: &[String]) -> bool {
+    !names.is_empty() && names.iter().all(|n| dir.join(n).exists())
+}
+
 /// Скачать модель: все файлы из `urls` (и `sups[*].urls`) в `models/{id}/`.
 pub async fn download_model(
     voice: &Arc<VoiceState>,
@@ -178,7 +238,7 @@ pub async fn download_model(
         dl.id = id.to_string();
         dl.total = expected;
         dl.done = 0;
-        dl.state = "downloading".to_string();
+        dl.state = Phase::Downloading;
     }
     {
         let mut c = voice.cancel_dl.lock().unwrap();
@@ -207,11 +267,11 @@ pub async fn download_model(
 
     let dir = model_dir(id);
     if let Err(e) = std::fs::create_dir_all(&dir) {
-        log::error!("models dir: {e}");
-        {
-            let mut dl = voice.dl.lock().unwrap();
-            dl.state = format!("error: {e}");
-        }
+log::error!("models dir: {e}");
+            {
+                let mut dl = voice.dl.lock().unwrap();
+                dl.state = Phase::Error;
+            }
         voice.refresh_status();
         return;
     }
@@ -225,7 +285,7 @@ pub async fn download_model(
             log::error!("http client: {e}");
             {
                 let mut dl = voice.dl.lock().unwrap();
-                dl.state = format!("error: {e}");
+                dl.state = Phase::Error;
             }
             voice.refresh_status();
             return;
@@ -314,17 +374,18 @@ pub async fn download_model(
             let mut dl = voice.dl.lock().unwrap();
             dl.id = String::new();
             dl.done = 0;
-            dl.state = String::new();
+            dl.state = Phase::None;
         } else {
             let mut dl = voice.dl.lock().unwrap();
             dl.done = actual;
-            dl.state = if ok && (expected == 0 || actual >= expected) {
-                "done".to_string()
+            let ok_files = all_present(&dir, &model_files(m));
+            dl.state = if ok && ok_files {
+                Phase::Done
             } else {
-                "error".to_string()
+                Phase::Error
             };
             if let Ok(mut q) = pending.lock() {
-                if dl.state == "done" {
+                if dl.state == Phase::Done {
                     q.push(format!("[голос] «{name}» скачана"));
                 } else {
                     q.push(format!("[голос] ошибка скачивания «{name}»"));
@@ -492,7 +553,7 @@ pub async fn run_command(
     pending: &Arc<std::sync::Mutex<Vec<String>>>,
 ) {
     match cmd["cmd"].as_str().unwrap_or("") {
-        "voice_lang" => {
+        cmd::LANG => {
             if let Some(l) = cmd["id"].as_str() {
                 if let Ok(mut g) = voice.lang.lock() {
                     *g = l.to_string();
@@ -501,7 +562,7 @@ pub async fn run_command(
                 voice.refresh_status();
             }
         }
-        "voice_select_stt" => {
+        cmd::SELECT_STT => {
             if let Some(id) = cmd["id"].as_str() {
                 if let Ok(mut g) = voice.stt_model.lock() {
                     *g = id.to_string();
@@ -510,7 +571,7 @@ pub async fn run_command(
                 voice.refresh_status();
             }
         }
-        "voice_select_tts" => {
+        cmd::SELECT_TTS => {
             if let Some(id) = cmd["id"].as_str() {
                 if let Ok(mut g) = voice.tts_model.lock() {
                     *g = id.to_string();
@@ -519,15 +580,19 @@ pub async fn run_command(
                 voice.refresh_status();
             }
         }
-        "voice_download" => {
+        cmd::DOWNLOAD => {
             if let Some(id) = cmd["id"].as_str() {
+                // Одно скачивание за раз: параллельные потоки по 60 МБ тормозят UI.
                 let busy = voice
                     .dl
                     .lock()
-                    .map(|g| g.id == id && g.state == "downloading")
+                    .map(|g| g.state == Phase::Downloading)
                     .unwrap_or(false);
                 if busy {
-                    log::info!("{id} уже качается");
+                    log::info!("{id}: дождитесь текущего скачивания");
+                    if let Ok(mut q) = pending.lock() {
+                        q.push("[голос] уже идёт скачивание — дождитесь его завершения".to_string());
+                    }
                 } else {
                     let cat = load_catalog();
                     let voice2 = voice.clone();
@@ -547,13 +612,13 @@ pub async fn run_command(
                 }
             }
         }
-        "voice_download_cancel" => {
+        cmd::DOWNLOAD_CANCEL => {
             if let Ok(mut c) = voice.cancel_dl.lock() {
                 *c = true;
             }
             log::info!("отмена скачивания запрошена");
         }
-        "voice_delete" => {
+        cmd::DELETE => {
             if let Some(id) = cmd["id"].as_str() {
                 let dir = model_dir(id);
                 match std::fs::remove_dir_all(&dir) {
@@ -576,8 +641,8 @@ pub async fn run_command(
                 voice.refresh_status();
             }
         }
-        "voice_record_start" => start_recording(voice).await,
-        "voice_record_stop" => {
+        cmd::RECORD_START => start_recording(voice).await,
+        cmd::RECORD_STOP => {
             stop_recording(voice).await;
             // подтверждаем завершение слушания коротким beep-сообщением
             if let Ok(mut q) = pending.lock() {
@@ -585,7 +650,7 @@ pub async fn run_command(
             }
             stt_from_call(voice, pending).await;
         }
-        "voice_stt" => stt_from_call(voice, pending).await,
+        cmd::STT => stt_from_call(voice, pending).await,
         _ => {}
     }
 }

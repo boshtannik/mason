@@ -451,15 +451,15 @@ async fn run_stream(
                                 Err(e) => log::error!("delete_session: {e}"),
                             }
                         }
-                        "voice_lang"
-                        | "voice_select_stt"
-                        | "voice_select_tts"
-                        | "voice_download"
-                        | "voice_download_cancel"
-                        | "voice_delete"
-                        | "voice_record_start"
-                        | "voice_record_stop"
-                        | "voice_stt" => {
+                        voice::cmd::LANG
+                        | voice::cmd::SELECT_STT
+                        | voice::cmd::SELECT_TTS
+                        | voice::cmd::DOWNLOAD
+                        | voice::cmd::DOWNLOAD_CANCEL
+                        | voice::cmd::DELETE
+                        | voice::cmd::RECORD_START
+                        | voice::cmd::RECORD_STOP
+                        | voice::cmd::STT => {
                             voice::run_command(&voice, &cmd, &worker_pending).await;
                         }
                         other => log::warn!("неизвестная команда: {other} ({raw})"),
