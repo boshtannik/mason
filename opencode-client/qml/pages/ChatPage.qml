@@ -10,6 +10,15 @@ Item {
     readonly property bool busy: appWindow.statusText === "busy"
     readonly property bool micRight: appWindow.pttPosition === "right"
 
+    // ms (unix) → «HH:MM» местного времени.
+    function tsLabel(ms) {
+        if (!ms)
+            return ""
+        var d = new Date(Number(ms))
+        var h = d.getHours(), m = d.getMinutes()
+        return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m
+    }
+
     StatusHeader {
         id: header
         appWindow: chatPage.appWindow
@@ -41,9 +50,25 @@ Item {
             width: chatList.width
             height: bubble.height + Theme.paddingSmall
 
-            property bool isUser: ("" + modelData).substring(0, 4) === ">>> "
-            property string body: isUser ? ("" + modelData).substring(4) : ("" + modelData)
-            property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
+            // Сырая строка от воркера: `[[t:<ms>]]>>> текст` (юзер) или
+            // `[[t:<ms>]]текст` (агент); живой юзер от `send()` — `[[t:<ms>]]>>> текст`.
+            property string raw: "" + modelData
+            property string tsMs: {
+                var m = /\[\[t:(\d+)\]\]/.exec(line.raw)
+                return m ? m[1] : ""
+            }
+            // Юзер-строки помечены префиксом «>>> » ПОСЛЕ таймстампа.
+            property bool isUser: {
+                var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
+                return b.substring(0, 4) === ">>> "
+            }
+            property string body: {
+                var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
+                if (b.substring(0, 4) === ">>> ")
+                    b = b.substring(4)
+                return b.replace(/^\n+/, "")
+            }
+            readonly property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
 
             Rectangle {
                 id: bubble
@@ -51,8 +76,12 @@ Item {
                 color: line.isUser
                        ? Theme.highlightColor
                        : Theme.rgba(Theme.primaryColor, 0.12)
-                width: Math.min(line.maxW, textLabel.implicitWidth + 2 * Theme.paddingSmall)
-                height: textLabel.height + 2 * Theme.paddingSmall
+                width: Math.min(line.maxW,
+                                Math.max(textLabel.implicitWidth, tsLabel.implicitWidth)
+                                + 2 * Theme.paddingSmall)
+                height: textLabel.height
+                        + (tsLabel.visible ? tsLabel.height + 2 : 0)
+                        + 2 * Theme.paddingSmall
                 anchors.right: line.isUser ? parent.right : undefined
                 anchors.left: line.isUser ? undefined : parent.left
                 anchors.rightMargin: line.isUser ? Theme.horizontalPageMargin : 0
@@ -67,6 +96,17 @@ Item {
                     wrapMode: Text.Wrap
                     font.pixelSize: Theme.fontSizeSmall
                     color: Theme.primaryColor
+                }
+                Label {
+                    id: tsLabel
+                    visible: line.tsMs !== ""
+                    x: line.isUser
+                       ? Theme.paddingSmall
+                       : bubble.width - implicitWidth - Theme.paddingSmall
+                    y: textLabel.y + textLabel.height + 2
+                    text: chatPage.tsLabel(line.tsMs)
+                    font.pixelSize: Theme.fontSizeExtraSmall
+                    color: Theme.secondaryColor
                 }
             }
         }

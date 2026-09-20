@@ -115,8 +115,12 @@ ApplicationWindow {
             for (var i = 0; i < lines.length; i++) {
                 var line = lines[i]
                 if (line !== "") {
-                    // Служебные метки воркера сразу убираем из текста.
-                    line = line.replace(/^\[\[stt\]\] /, "")
+                    // Распознанное (STT) — юзер-баббл справа с таймстампом.
+                    if (line.substring(0, 7) === "[[stt]]") {
+                        line = line.substring(7).replace(/^\s+/, "")
+                        if (line !== "")
+                            line = "[[t:" + Date.now() + "]]>>> " + line
+                    }
                     acc = acc.concat(line)
                 }
             }
@@ -198,7 +202,7 @@ ApplicationWindow {
         if (t === "")
             return
         var acc = app.messages
-        acc = acc.concat(">>> " + t)
+        acc = acc.concat("[[t:" + Date.now() + "]]>>> " + t)
         app.messages = acc
         bridge.send_prompt(t)
     }
