@@ -20,6 +20,32 @@ pub enum ToolState {
     },
 }
 
+impl ToolState {
+    /// Статус для ленты чата: running | completed | error.
+    pub fn ui_status(&self) -> &'static str {
+        match self {
+            ToolState::Pending { .. } | ToolState::Running { .. } => "running",
+            ToolState::Completed { .. } => "completed",
+            ToolState::Error { .. } => "error",
+        }
+    }
+
+    /// Короткое описание для карточки тула в чате.
+    pub fn description(&self) -> String {
+        match self {
+            ToolState::Pending { input } | ToolState::Running { input } => input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .or_else(|| input.get("prompt").and_then(|v| v.as_str()))
+                .or_else(|| input.get("filePath").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string(),
+            ToolState::Completed { title, .. } => title.clone(),
+            ToolState::Error { error, .. } => error.clone(),
+        }
+    }
+}
+
 /// Тур-часть сообщения: вызов инструмента с состоянием.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolPart {

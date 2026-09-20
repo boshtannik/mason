@@ -207,9 +207,14 @@ Item {
                     text: qsTr("Компактнуть (сжать историю)")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
-                onClicked: sessionSettingsPage.runAction(function() {
-                    appWindow.summarizeSession(sessionSettingsPage.sessionId)
-                })
+                onClicked: {
+                    var sid = sessionSettingsPage.sessionId
+                    remorse.execute(qsTr("Сжать историю?"), function() {
+                        sessionSettingsPage.runAction(function() {
+                            appWindow.summarizeSession(sid)
+                        })
+                    })
+                }
             }
 
             BackgroundItem {
@@ -223,18 +228,6 @@ Item {
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: appWindow.abortSession(sessionSettingsPage.sessionId)
-            }
-
-            BackgroundItem {
-                width: parent.width
-                contentHeight: Theme.itemSizeSmall
-                Label {
-                    x: Theme.horizontalPageMargin
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Очистить историю")
-                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
-                }
-                onClicked: appWindow.clearHistory()
             }
 
             SectionHeader { text: qsTr("TODO-задачи агента") }
@@ -287,6 +280,10 @@ Item {
         }
 
         VerticalScrollDecorator {}
+    }
+
+    RemorsePopup {
+        id: remorse
     }
 
     Component {

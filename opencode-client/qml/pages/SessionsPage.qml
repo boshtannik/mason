@@ -58,6 +58,13 @@ Item {
 
         PullDownMenu {
             MenuItem {
+                text: qsTr("Удалить все сессии")
+                enabled: list.count > 0
+                onClicked: remorse.execute(qsTr("Удалить все сессии?"), function() {
+                    appWindow.deleteAllSessions()
+                })
+            }
+            MenuItem {
                 text: qsTr("New session")
                 onClicked: appWindow.newSession()
             }

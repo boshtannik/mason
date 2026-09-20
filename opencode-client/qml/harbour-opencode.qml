@@ -36,30 +36,12 @@ ApplicationWindow {
 
     // Голосовой модуль: статус из воркера (`voice_status_json`).
     property var voiceModels: []
-    property variant voiceLangOptions: [ { id: "auto", name: "Auto (detect)" } ]
+    property variant voiceLangOptions: ["auto"]
     property string chosenStt: ""
     property string chosenTts: ""
     property string voiceLang: "auto"
     // Идёт ли запись с микрофона (PTT-переключатель).
     property bool recording: false
-
-    // Протокольные константы голосового модуля.
-    // Команды зеркалят `voice::cmd` в src/voice.rs, движки — `voice::engine`,
-    // фазы — `voice::Phase` (as_str). Менять их можно только с обеих сторон.
-    // Внимание: QML запрещает имена свойств с большой буквы — только lowercase.
-    readonly property string cmdLang: "voice_lang"
-    readonly property string cmdSelectStt: "voice_select_stt"
-    readonly property string cmdSelectTts: "voice_select_tts"
-    readonly property string cmdDownload: "voice_download"
-    readonly property string cmdDownloadCancel: "voice_download_cancel"
-    readonly property string cmdDelete: "voice_delete"
-    readonly property string cmdRecordStart: "voice_record_start"
-    readonly property string cmdRecordStop: "voice_record_stop"
-    readonly property string cmdStt: "voice_stt"
-    readonly property string engineStt: "stt_whisper"
-    readonly property string engineTts: "tts_piper"
-    readonly property string stateDownloading: "downloading"
-    readonly property string stateError: "error"
 
     // Запрос переключить страницу карусели (0..3).
     signal requestPage(int index)
@@ -173,10 +155,8 @@ ApplicationWindow {
                 app.chosenStt = vo.stt || ""
                 app.chosenTts = vo.tts || ""
                 app.voiceLang = vo.lang || "auto"
-                if (vo.langs && vo.langs.length) {
-                    var opts = [{ id: "auto", name: qsTr("Auto (detect)") }]
-                    app.voiceLangOptions = opts.concat(vo.langs)
-                }
+                if (vo.langs && vo.langs.length)
+                    app.voiceLangOptions = ["auto"].concat(vo.langs)
             } catch (e) {
                 console.log("voice parse error: " + e)
             }
@@ -212,10 +192,10 @@ ApplicationWindow {
     function startPtt() {
         if (!app.recording) {
             app.recording = true
-            app.voiceCmd(app.cmdRecordStart, "")
+            app.voiceCmd("voice_record_start", "")
         } else {
             app.recording = false
-            app.voiceCmd(app.cmdRecordStop, "")
+            app.voiceCmd("voice_record_stop", "")
         }
     }
     function voiceModelsFor(engine) {
@@ -232,10 +212,10 @@ ApplicationWindow {
         return "—"
     }
     function sttModelName() {
-        return app.modelName(app.chosenStt, app.voiceModelsFor(app.engineStt))
+        return app.modelName(app.chosenStt, app.voiceModelsFor("stt_whisper"))
     }
     function ttsModelName() {
-        return app.modelName(app.chosenTts, app.voiceModelsFor(app.engineTts))
+        return app.modelName(app.chosenTts, app.voiceModelsFor("tts_piper"))
     }
     function humanSize(b) {
         if (!b) return ""

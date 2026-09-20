@@ -27,14 +27,29 @@ opencode server over SSE and provides a Silica chat UI.
 # - BUILD ----------------------------------------------------------------------
 %build
 cd opencode-client
-export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now -Ccodegen-units=1 -Clink-arg=-rdynamic"
-export CARGO_INCREMENTAL=0
+MODE="${MBUILD_MODE:-debug}"
+echo "harbour-opencode: MBUILD_MODE=$MODE"
 export QMAKE=/usr/lib64/qt5/bin/qmake
 export SB2_RUST_TARGET_TRIPLE=aarch64-unknown-linux-gnu
 export CC_aarch64_unknown_linux_gnu=aarch64-meego-linux-gnu-gcc
 export CXX_aarch64_unknown_linux_gnu=aarch64-meego-linux-gnu-g++
 export AR_aarch64_unknown_linux_gnu=aarch64-meego-linux-gnu-ar
-cargo build -j 1
+case "$MODE" in
+  release)
+    # Релиз: сжатый код и лучшая генерация — медленно, только для дистрибуции.
+    export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now -Ccodegen-units=1 -Clink-arg=-rdynamic"
+    export CARGO_INCREMENTAL=0
+    export CARGO_TARGET_DIR=/home/mersdk/cargo-cache/cargo/release
+    cargo build --release -j 1
+    ;;
+  *)
+    # Dev-сборка по умолчанию: без оптимизаций и заморозки codegen-units.
+    export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now -Clink-arg=-rdynamic"
+    export CARGO_INCREMENTAL=1
+    export CARGO_TARGET_DIR=/home/mersdk/cargo-cache/cargo/debug
+    cargo build -j 1
+    ;;
+esac
 
 # whisper.cpp: статический бинарник whisper-cli (STT). Сборка без OpenBLAS/COREML.
 cd ../third_party/whisper.cpp
@@ -46,11 +61,19 @@ make -j1 \
 test -x main
 ls -l main
 
+# Piper (TTS): проверка наличия эталонной aarch64-сборки в кэше (скачивает mbuild.sh).
+test -x /home/mersdk/cargo-cache/piper-aarch64/piper/piper
+ls -l /home/mersdk/cargo-cache/piper-aarch64/piper
+
 # - INSTALL --------------------------------------------------------------------
 %install
+MODE="${MBUILD_MODE:-debug}"
 rm -rf %{buildroot}
-install -Dm 755 opencode-client/target/aarch64-unknown-linux-gnu/debug/harbour-opencode -t %{buildroot}%{_bindir}
+install -Dm 755 /home/mersdk/cargo-cache/cargo/$MODE/aarch64-unknown-linux-gnu/$MODE/harbour-opencode -t %{buildroot}%{_bindir}
 install -Dm 755 third_party/whisper.cpp/main %{buildroot}%{_libexecdir}/%{name}/whisper-cli
+# Piper: весь каталог целиком (бинарь + .so с RUNPATH=$ORIGIN + espeak-ng-data).
+mkdir -p %{buildroot}%{_libexecdir}/%{name}/piper
+cp -a /home/mersdk/cargo-cache/piper-aarch64/piper/. %{buildroot}%{_libexecdir}/%{name}/piper/
 install -Dm 644 opencode-client/assets/models.json -t %{buildroot}%{_datadir}/%{name}
 install -Dm 644 harbour-opencode.png -t %{buildroot}%{_datadir}/icons/hicolor/86x86/apps
 install -Dm 644 harbour-opencode.desktop -t %{buildroot}%{_datadir}/applications
@@ -63,7 +86,8 @@ desktop-file-install --delete-original    \
 
 # - CHECK ----------------------------------------------------------------------
 %check
-if nm -D opencode-client/target/aarch64-unknown-linux-gnu/debug/harbour-opencode | grep " T main$" > /dev/null ; then
+MODE="${MBUILD_MODE:-debug}"
+if nm -D /home/mersdk/cargo-cache/cargo/$MODE/aarch64-unknown-linux-gnu/$MODE/harbour-opencode | grep " T main$" > /dev/null ; then
   echo "main symbol exists"
 else
   echo "main symbol is missing"
@@ -75,6 +99,7 @@ fi
 %defattr(-,root,root,-)
 %{_bindir}/harbour-opencode
 %{_libexecdir}/%{name}/whisper-cli
+%{_libexecdir}/%{name}/piper
 %{_datadir}/%{name}/qml
 %{_datadir}/%{name}/models.json
 %{_datadir}/applications/%{name}.desktop

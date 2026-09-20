@@ -1,6 +1,8 @@
 use qmetaobject::*;
 use std::sync::{Arc, Mutex};
 
+use crate::cmd::Cmd;
+
 /// Мост Rust-core ←→ QML.
 ///
 /// Потоки: QML-движок живёт в главном потоке и вызывает методы `drain_messages`
@@ -50,6 +52,12 @@ pub struct AppBridge {
     /// JSON-статус голосового модуля (каталог моделей + прогресс), пишет воркер.
     #[allow(dead_code)]
     voice_status_shared: Arc<Mutex<String>>,
+    /// Снимок активных тулов для ленты чата (JSON), пишет воркер.
+    #[allow(dead_code)]
+    tools_shared: Arc<Mutex<String>>,
+    /// Очередь запросов разрешений для диалога (JSON), пишет воркер.
+    #[allow(dead_code)]
+    permissions_shared: Arc<Mutex<String>>,
 
     /// QML: забрать и очистить накопленные сообщения (polling).
     drain_messages: qt_method!(fn drain_messages(&self) -> QString {
@@ -83,14 +91,14 @@ pub struct AppBridge {
     /// QML: создать новую сессию.
     new_session: qt_method!(fn new_session(&self) {
         log::info!("QML new_session");
-        self.push_command(serde_json::json!({ "cmd": "new" }));
+        self.push_command(serde_json::json!({ "cmd": Cmd::New }));
     }),
     /// QML: открыть сессию по id (загрузит историю).
     open_session: qt_method!(fn open_session(&self, id: QString) {
         let id = id.to_string();
         log::info!("QML open_session -> {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": "open", "id": id }));
+            self.push_command(serde_json::json!({ "cmd": Cmd::Open, "id": id }));
         }
     }),
     /// QML: переименовать сессию.
@@ -99,7 +107,7 @@ pub struct AppBridge {
         let title = title.to_string();
         log::info!("QML rename_session {id:?} -> {title:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": "rename", "id": id, "title": title }));
+            self.push_command(serde_json::json!({ "cmd": Cmd::Rename, "id": id, "title": title }));
         }
     }),
     /// QML: удалить сессию.
@@ -107,15 +115,20 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML delete_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": "delete", "id": id }));
+            self.push_command(serde_json::json!({ "cmd": Cmd::Delete, "id": id }));
         }
+    }),
+    /// QML: удалить все сессии.
+    delete_all_sessions: qt_method!(fn delete_all_sessions(&self) {
+        log::info!("QML delete_all_sessions");
+        self.push_command(serde_json::json!({ "cmd": Cmd::DeleteAll }));
     }),
     /// QML: форкнуть сессию (создать ветку).
     fork_session: qt_method!(fn fork_session(&self, id: QString) {
         let id = id.to_string();
         log::info!("QML fork_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": "fork", "id": id }));
+            self.push_command(serde_json::json!({ "cmd": Cmd::Fork, "id": id }));
         }
     }),
     /// QML: поделиться сессией (получить ссылку).
@@ -123,7 +136,7 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML share_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": "share", "id": id }));
+            self.push_command(serde_json::json!({ "cmd": Cmd::Share, "id": id }));
         }
     }),
     /// QML: снять доступ по ссылке.
@@ -131,7 +144,7 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML unshare_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": "unshare", "id": id }));
+            self.push_command(serde_json::json!({ "cmd": Cmd::Unshare, "id": id }));
         }
     }),
     /// QML: суммировать (сжать) историю сессии.
@@ -139,7 +152,7 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML summarize_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": "summarize", "id": id }));
+            self.push_command(serde_json::json!({ "cmd": Cmd::Summarize, "id": id }));
         }
     }),
     /// QML: прервать выполнение в сессии.
@@ -147,7 +160,7 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML abort_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": "abort", "id": id }));
+            self.push_command(serde_json::json!({ "cmd": Cmd::Abort, "id": id }));
         }
     }),
     /// QML: id текущей сессии (read-only, обновляется воркером).
@@ -183,7 +196,7 @@ pub struct AppBridge {
         log::info!("QML set_model {id:?} -> {provider}/{model}");
         if !id.is_empty() && !provider.is_empty() && !model.is_empty() {
             self.push_command(serde_json::json!({
-                "cmd": "set_model", "id": id, "provider": provider, "model": model
+                "cmd": Cmd::SetModel, "id": id, "provider": provider, "model": model
             }));
         }
     }),
@@ -199,12 +212,39 @@ pub struct AppBridge {
             .unwrap_or(-1)
     }),
     /// QML: голосовая команда (cmd + payload: id модели / lang). Async — воркер.
+    /// Строка от QML проверяется через `Cmd` — неизвестные значения отбрасываются.
     voice_command: qt_method!(fn voice_command(&self, cmd: QString, val: QString) {
-        let cmd = cmd.to_string();
         let val = val.to_string();
-        log::info!("QML voice {cmd:?} {val:?}");
-        if !cmd.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": cmd, "id": val }));
+        let cmd: Option<Cmd> = serde_json::from_value(serde_json::json!(cmd.to_string())).ok();
+        match cmd {
+            Some(action) if action.is_voice() => {
+                log::info!("QML voice {action:?} {val:?}");
+                self.push_command(serde_json::json!({ "cmd": action, "id": val }));
+            }
+            Some(action) => log::warn!("QML voice: не голосовая команда {action:?}"),
+            None => log::warn!("QML voice: неизвестная команда"),
+        }
+    }),
+    /// QML: активные тулы текущего хода как JSON `[{id,name,status,text}]`.
+    tools_json: qt_method!(fn tools_json(&self) -> QString {
+        let v = self.tools_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+    /// QML: запросы разрешений как JSON `[{id,sessionID,action,resources,options}]`.
+    permissions_json: qt_method!(fn permissions_json(&self) -> QString {
+        let v = self.permissions_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+    /// QML: ответить на запрос разрешения (`response`: once | always | reject).
+    answer_permission: qt_method!(fn answer_permission(&self, session: QString, id: QString, response: QString) {
+        let session = session.to_string();
+        let id = id.to_string();
+        let response = response.to_string();
+        log::info!("QML answer_permission {session:?} {id:?} -> {response:?}");
+        if !session.is_empty() && !id.is_empty() && !response.is_empty() {
+            self.push_command(serde_json::json!({
+                "cmd": Cmd::Permission, "session": session, "id": id, "response": response
+            }));
         }
     }),
 }
@@ -284,6 +324,16 @@ impl AppBridge {
     /// Хэндл статуса голосового модуля для воркера.
     pub fn voice_status_handle(&self) -> Arc<Mutex<String>> {
         self.voice_status_shared.clone()
+    }
+
+    /// Хэндл снимка тулов для воркера.
+    pub fn tools_handle(&self) -> Arc<Mutex<String>> {
+        self.tools_shared.clone()
+    }
+
+    /// Хэндл очереди разрешений для воркера.
+    pub fn permissions_handle(&self) -> Arc<Mutex<String>> {
+        self.permissions_shared.clone()
     }
 
     /// Положить JSON-команду в очередь для воркера.

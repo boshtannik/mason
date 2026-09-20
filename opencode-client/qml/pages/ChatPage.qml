@@ -42,8 +42,18 @@ Item {
             height: bubble.height + Theme.paddingSmall
 
             property bool isUser: ("" + modelData).substring(0, 4) === ">>> "
-            property string body: isUser ? ("" + modelData).substring(4) : ("" + modelData)
-            property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
+            property string rawBody: isUser ? ("" + modelData).substring(4) : ("" + modelData)
+
+            property string ts: {
+                var m = /\[\[t:(\d+)\]\]/.exec(rawBody)
+                return m ? chatPage.tsLabel(m[1]) : ""
+            }
+            property string body: rawBody.replace(/\[\[t:\d+\]\]/, "").replace(/^\n+/, "")
+
+            readonly property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
+            property real bubbleH: textLabel.implicitHeight + tsLabel.visible
+                                ? tsLabel.height : 0
+                                + 2 * Theme.paddingSmall
 
             Rectangle {
                 id: bubble

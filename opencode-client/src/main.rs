@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use opencode_client::api;
 use opencode_client::bridge::app::AppBridge;
+use opencode_client::cmd::Cmd;
 use opencode_client::event;
 use opencode_client::server;
 use opencode_client::voice;
@@ -79,6 +80,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let models = bridge_pinned.borrow().models_handle();
     let sounds = bridge_pinned.borrow().sounds_handle();
     let voice = voice::VoiceState::with_status(bridge_pinned.borrow().voice_status_handle());
+    let tools = bridge_pinned.borrow().tools_handle();
+    let permissions = bridge_pinned.borrow().permissions_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
@@ -102,6 +105,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_models = models.clone();
     let worker_sounds = sounds.clone();
     let worker_voice = voice.clone();
+    let worker_tools = tools.clone();
+    let worker_permissions = permissions.clone();
     let worker_url_tx = url_tx.clone();
     let worker_dispatcher = dispatcher.clone();
     let worker_base = env_base.clone();
@@ -143,6 +148,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_models,
                             worker_sounds,
                             worker_voice,
+                            worker_tools,
+                            worker_permissions,
                         )
                         .await
                     }
@@ -186,6 +193,8 @@ async fn run_worker(
     models: Arc<std::sync::Mutex<String>>,
     sounds: Arc<std::sync::Mutex<String>>,
     voice: Arc<voice::VoiceState>,
+    tools: Arc<std::sync::Mutex<String>>,
+    permissions: Arc<std::sync::Mutex<String>>,
 ) {
     loop {
         match run_stream(
@@ -203,6 +212,8 @@ async fn run_worker(
             models.clone(),
             sounds.clone(),
             voice.clone(),
+            tools.clone(),
+            permissions.clone(),
         )
         .await
         {
@@ -231,6 +242,8 @@ async fn run_stream(
     models: Arc<std::sync::Mutex<String>>,
     sounds: Arc<std::sync::Mutex<String>>,
     voice: Arc<voice::VoiceState>,
+    tools: Arc<std::sync::Mutex<String>>,
+    permissions: Arc<std::sync::Mutex<String>>,
 ) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
 
@@ -252,6 +265,8 @@ async fn run_stream(
     refresh_sessions(&client, &sessions).await;
     refresh_models(&client, &models).await;
     refresh_sounds(&sounds);
+    // Открываем последнюю сессию сразу при запуске — чат показывает её историю.
+    resume_last_session(&client, &mut current_session, &current_session_shared, &worker_pending, &todos).await;
 
     // Цикл: слушаем SSE и параллельно опрашиваем мост на новые промпты.
     loop {
@@ -290,7 +305,17 @@ async fn run_stream(
                                 if !text.trim().is_empty() {
                                     log::info!("push answer: {:?}", text);
                                     if let Ok(mut q) = worker_pending.lock() {
-                                        q.push(text);
+                                        q.push(format!("[[t:{}]]{text}", now_ms()));
+                                    }
+                                    // Автоозвучка: весь ответ целиком (несколько бабблов внутри
+                                    // одного ответа тоже собираются в `text` — см. память проекта).
+                                    let tts_mode = voice
+                                        .tts_mode
+                                        .lock()
+                                        .map(|m| *m)
+                                        .unwrap_or_default();
+                                    if tts_mode == voice::TtsMode::Auto {
+                                        voice::tts_from_call(&voice, &text, &worker_pending).await;
                                     }
                                 }
                                 set_status(&status, "idle");
@@ -320,16 +345,21 @@ async fn run_stream(
                             continue;
                         }
                     };
-                    let action = cmd["cmd"].as_str().unwrap_or("");
+                    let raw_cmd = cmd["cmd"].as_str().unwrap_or("");
+                    let action: Option<Cmd> = cmd
+                        .get("cmd")
+                        .and_then(|c| serde_json::from_value(c.clone()).ok());
                     let sid = cmd["id"].as_str().unwrap_or("");
                     match action {
-                        "new" => match client.create_session().await {
+                        Some(Cmd::New) => match client.create_session().await {
                             Ok(sess) => match sess["id"].as_str() {
                                 Some(id) => {
                                     log::info!("new session: {id}");
                                     current_session = Some(id.to_string());
+                                    persist_last_session(Some(id));
                                     parts.clear();
                                     assistant_messages.clear();
+                                    clear_tools(&dispatcher, &tools).await;
                                     refresh_sessions(&client, &sessions).await;
                                     set_current_session(&current_session_shared, &current_session);
                                     if let Ok(mut g) = todos.lock() {
@@ -340,24 +370,34 @@ async fn run_stream(
                             },
                             Err(e) => log::error!("new_session: {e}"),
                         },
-                        "open" if !sid.is_empty() => {
+                        Some(Cmd::Open) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
                             log::info!("open session: {sid}");
                             current_session = Some(sid.to_string());
+                            persist_last_session(Some(sid));
                             parts.clear();
                             assistant_messages.clear();
+                            clear_tools(&dispatcher, &tools).await;
                             load_history(&client, sid, &worker_pending).await;
                             set_status(&status, "idle");
                             set_current_session(&current_session_shared, &current_session);
                             refresh_todo(&client, sid, &todos).await;
                         }
-                        "fork" if !sid.is_empty() => {
+                        Some(Cmd::Fork) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
                             match client.fork_session(sid).await {
                                 Ok(sess) => match sess["id"].as_str() {
                                     Some(new_id) => {
                                         log::info!("fork {sid} -> {new_id}");
                                         current_session = Some(new_id.to_string());
+                                        persist_last_session(Some(new_id));
                                         parts.clear();
                                         assistant_messages.clear();
+                                        clear_tools(&dispatcher, &tools).await;
                                         load_history(&client, new_id, &worker_pending).await;
                                         refresh_sessions(&client, &sessions).await;
                                         set_current_session(&current_session_shared, &current_session);
@@ -369,7 +409,31 @@ async fn run_stream(
                                 Err(e) => log::error!("fork_session: {e}"),
                             }
                         }
-                        "share" if !sid.is_empty() => {
+                        Some(Cmd::Permission) => {
+                            let session_id = cmd["session"].as_str().unwrap_or("");
+                            let pid = cmd["id"].as_str().unwrap_or("");
+                            if session_id.is_empty() || pid.is_empty() {
+                                continue;
+                            }
+                            let kind = match cmd["response"].as_str() {
+                                Some("once") => Some(opencode_client::types::event::PermissionReplyKind::Once),
+                                Some("always") => Some(opencode_client::types::event::PermissionReplyKind::Always),
+                                Some("reject") => Some(opencode_client::types::event::PermissionReplyKind::Reject),
+                                _ => None,
+                            };
+                            match kind {
+                                Some(kind) => match client.answer_permission(session_id, pid, &kind).await {
+                                    Ok(true) => log::info!("permission {session_id}/{pid} -> {kind:?}"),
+                                    Ok(false) => log::warn!("permission {session_id}/{pid}: сервер не принял ответ"),
+                                    Err(e) => log::error!("answer_permission: {e}"),
+                                },
+                                None => log::warn!("permission: неизвестный ответ {}", cmd["response"]),
+                            }
+                        }
+                        Some(Cmd::Share) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
                             match client.share_session(sid).await {
                                 Ok(sess) => {
                                     let url = sess["share"]["url"].as_str().unwrap_or("");
@@ -379,7 +443,10 @@ async fn run_stream(
                                 Err(e) => log::error!("share_session: {e}"),
                             }
                         }
-                        "unshare" if !sid.is_empty() => {
+                        Some(Cmd::Unshare) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
                             match client.unshare_session(sid).await {
                                 Ok(()) => {
                                     log::info!("unshare {sid}");
@@ -388,7 +455,10 @@ async fn run_stream(
                                 Err(e) => log::error!("unshare_session: {e}"),
                             }
                         }
-                        "summarize" if !sid.is_empty() => {
+                        Some(Cmd::Summarize) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
                             match client.get_session(sid).await {
                                 Ok(s) => {
                                     let provider = s["model"]["providerID"].as_str().unwrap_or("");
@@ -405,7 +475,10 @@ async fn run_stream(
                                 Err(e) => log::error!("get_session: {e}"),
                             }
                         }
-                        "abort" if !sid.is_empty() => {
+                        Some(Cmd::Abort) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
                             match client.abort(sid).await {
                                 Ok(_) => {
                                     log::info!("abort {sid}");
@@ -414,7 +487,10 @@ async fn run_stream(
                                 Err(e) => log::error!("abort: {e}"),
                             }
                         }
-                        "set_model" if !sid.is_empty() => {
+                        Some(Cmd::SetModel) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
                             let provider = cmd["provider"].as_str().unwrap_or("");
                             let model = cmd["model"].as_str().unwrap_or("");
                             match client.set_model(sid, provider, model).await {
@@ -425,7 +501,10 @@ async fn run_stream(
                                 Err(e) => log::error!("set_model: {e}"),
                             }
                         }
-                        "rename" if !sid.is_empty() => {
+                        Some(Cmd::Rename) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
                             let title = cmd["title"].as_str().unwrap_or("");
                             match client.rename_session(sid, title).await {
                                 Ok(()) => {
@@ -435,12 +514,16 @@ async fn run_stream(
                                 Err(e) => log::error!("rename_session: {e}"),
                             }
                         }
-                        "delete" if !sid.is_empty() => {
+                        Some(Cmd::Delete) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
                             match client.delete_session(sid).await {
                                 Ok(()) => {
                                     log::info!("deleted {sid}");
                                     if current_session.as_deref() == Some(sid) {
                                         current_session = None;
+                                        persist_last_session(None);
                                         set_current_session(&current_session_shared, &current_session);
                                         if let Ok(mut g) = todos.lock() {
                                             *g = "[]".to_string();
@@ -451,18 +534,79 @@ async fn run_stream(
                                 Err(e) => log::error!("delete_session: {e}"),
                             }
                         }
-                        voice::cmd::LANG
-                        | voice::cmd::SELECT_STT
-                        | voice::cmd::SELECT_TTS
-                        | voice::cmd::DOWNLOAD
-                        | voice::cmd::DOWNLOAD_CANCEL
-                        | voice::cmd::DELETE
-                        | voice::cmd::RECORD_START
-                        | voice::cmd::RECORD_STOP
-                        | voice::cmd::STT => {
+                        Some(Cmd::DeleteAll) => {
+                            let ids: Vec<String> = match client.list_sessions().await {
+                                Ok(v) => v
+                                    .as_array()
+                                    .map(|a| {
+                                        a.iter()
+                                            .filter_map(|s| {
+                                                s["id"].as_str().map(|x| x.to_string())
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                                Err(e) => {
+                                    log::error!("delete_all: list_sessions: {e}");
+                                    Vec::new()
+                                }
+                            };
+                            if ids.is_empty() {
+                                log::info!("delete_all: сессий нет");
+                            } else {
+                                let mut ok = 0;
+                                for id in &ids {
+                                    match client.delete_session(id).await {
+                                        Ok(()) => ok += 1,
+                                        Err(e) => log::error!("delete_all: {id}: {e}"),
+                                    }
+                                }
+                                log::info!("delete_all: удалено {ok}/{}", ids.len());
+                            }
+                            if current_session.is_some() {
+                                current_session = None;
+                                persist_last_session(None);
+                                set_current_session(&current_session_shared, &current_session);
+                                if let Ok(mut g) = todos.lock() {
+                                    *g = "[]".to_string();
+                                }
+                            }
+                            refresh_sessions(&client, &sessions).await;
+                            // После удаления всех сессий сразу заводим свежую — чат не пустует.
+                            match client.create_session().await {
+                                Ok(sess) => match sess["id"].as_str() {
+                                    Some(id) => {
+                                        log::info!("delete_all: создаю новую сессию {id}");
+                                        current_session = Some(id.to_string());
+                                        persist_last_session(Some(id));
+                                        parts.clear();
+                                        assistant_messages.clear();
+                                        clear_tools(&dispatcher, &tools).await;
+                                        set_current_session(&current_session_shared, &current_session);
+                                        if let Ok(mut g) = todos.lock() {
+                                            *g = "[]".to_string();
+                                        }
+                                    }
+                                    None => log::error!("delete_all: нет id при создании"),
+                                },
+                                Err(e) => log::error!("delete_all: create_session: {e}"),
+                            }
+                            request_nav(&nav, 2);
+                        }
+                        Some(Cmd::VoiceLang)
+                        | Some(Cmd::VoiceSelectStt)
+                        | Some(Cmd::VoiceSelectTts)
+                        | Some(Cmd::VoiceDownload)
+                        | Some(Cmd::VoiceDownloadCancel)
+                        | Some(Cmd::VoiceDelete)
+                        | Some(Cmd::VoiceRecordStart)
+                        | Some(Cmd::VoiceRecordStop)
+                        | Some(Cmd::VoiceStt)
+                        | Some(Cmd::VoiceTts)
+                        | Some(Cmd::VoiceTtsMode) => {
                             voice::run_command(&voice, &cmd, &worker_pending).await;
                         }
-                        other => log::warn!("неизвестная команда: {other} ({raw})"),
+                        None => log::warn!("неизвестная команда: {raw_cmd:?} ({raw})"),
                     }
                 }
 
@@ -475,6 +619,7 @@ async fn run_stream(
                             Ok(sess) => match sess["id"].as_str() {
                                 Some(id) => {
                                     current_session = Some(id.to_string());
+                                    persist_last_session(Some(id));
                                     set_current_session(&current_session_shared, &current_session);
                                 }
                                 None => {
@@ -498,6 +643,11 @@ async fn run_stream(
                         }
                     }
                     if let Some(sid) = current_session.clone() {
+                        // Новый ход пользователя — тулы прошлого хода исчезают из ленты.
+                        {
+                            let mut st = dispatcher.lock().await;
+                            st.tools.states.clear();
+                        }
                         if let Err(e) = client.prompt_async(&sid, &prompt).await {
                             log::error!("prompt_async: {e}");
                             if let Ok(mut q) = worker_pending.lock() {
@@ -514,6 +664,12 @@ async fn run_stream(
                     if let Some(sid) = current_session.clone() {
                         refresh_todo(&client, &sid, &todos).await;
                     }
+                }
+
+                // Раз в ~1 секунду — снимок тулов и запросов разрешений для QML.
+                if ticks % 5 == 0 {
+                    refresh_tools_json(&dispatcher, &tools).await;
+                    refresh_permissions_json(&dispatcher, &permissions).await;
                 }
             }
         }
@@ -706,6 +862,7 @@ async fn load_history(
             let mut lines: Vec<String> = Vec::new();
             for e in items {
                 let role = e["info"]["role"].as_str().unwrap_or("");
+                let created = e["info"]["time"]["created"].as_u64().unwrap_or(0);
                 let mut text = String::new();
                 if let Some(parts) = e["parts"].as_array() {
                     for p in parts {
@@ -720,9 +877,9 @@ async fn load_history(
                     continue;
                 }
                 if role == "user" {
-                    lines.push(format!(">>> {text}"));
+                    lines.push(format!("[[t:{created}]]>>> {text}"));
                 } else {
-                    lines.push(text);
+                    lines.push(format!("[[t:{created}]]{text}"));
                 }
             }
             log::info!("история сессии {session_id}: {} строк", lines.len());
@@ -752,5 +909,179 @@ fn set_current_session(shared: &Arc<std::sync::Mutex<String>>, session: &Option<
 fn request_nav(nav: &Arc<std::sync::Mutex<i32>>, page: i32) {
     if let Ok(mut n) = nav.lock() {
         *n = page;
+    }
+}
+
+/// Файл, где хранится id последней открытой сессии (для авто-открытия на старте).
+fn last_session_path() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let dir = std::path::PathBuf::from(home).join(".local/share/harbour-opencode");
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir.join("last_session"))
+}
+
+/// Запомнить текущую сессию (`None` — стереть запись).
+fn persist_last_session(session: Option<&str>) {
+    let Some(path) = last_session_path() else { return };
+    match session {
+        Some(id) => {
+            if let Err(e) = std::fs::write(&path, id) {
+                log::error!("persist last_session: {e}");
+            }
+        }
+        None => {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+/// При старте открыть последнюю сессию: проверить существование, загрузить историю.
+/// Если последней сессии нет — создать новую (чат не должен быть пустым/мёртвым).
+async fn resume_last_session(
+    client: &api::OpenCodeClient,
+    current_session: &mut Option<String>,
+    current_session_shared: &Arc<std::sync::Mutex<String>>,
+    pending: &Arc<std::sync::Mutex<Vec<String>>>,
+    todos: &Arc<std::sync::Mutex<String>>,
+) {
+    let last: Option<String> = last_session_path()
+        .and_then(|path| std::fs::read_to_string(&path).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    // Есть ли в живых запомненная сессия.
+    let resume_id = match last {
+        Some(id) => match client.list_sessions().await {
+            Ok(v) => {
+                let exists = v
+                    .as_array()
+                    .map(|a| a.iter().any(|s| s["id"].as_str() == Some(id.as_str())))
+                    .unwrap_or(false);
+                if exists {
+                    Some(id)
+                } else {
+                    log::info!("последняя сессия {id} больше не существует, создаю новую");
+                    None
+                }
+            }
+            Err(e) => {
+                log::error!("resume: list_sessions: {e}");
+                None
+            }
+        },
+        None => None,
+    };
+
+    // Последней сессии нет (в первый запуск или после удаления всех) — заводим свежую.
+    let sid = match resume_id {
+        Some(id) => id,
+        None => match client.create_session().await {
+            Ok(sess) => match sess["id"].as_str() {
+                Some(id) => {
+                    log::info!("создаю новую сессию: {id}");
+                    id.to_string()
+                }
+                None => {
+                    log::error!("new: в ответе нет session.id");
+                    return;
+                }
+            },
+            Err(e) => {
+                log::error!("create_session: {e}");
+                return;
+            }
+        },
+    };
+
+    log::info!("активная сессия: {sid}");
+    *current_session = Some(sid.clone());
+    persist_last_session(Some(&sid));
+    set_current_session(current_session_shared, &*current_session);
+    load_history(client, &sid, pending).await;
+    refresh_todo(client, &sid, todos).await;
+}
+
+/// Текущее время в unix ms.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Сбросить снимок тулов (при смене сессии, чтобы чужие тулы не
+/// примешивались к истории новой).
+async fn clear_tools(
+    dispatcher: &event::dispatcher::SharedState,
+    tools: &Arc<std::sync::Mutex<String>>,
+) {
+    {
+        let mut st = dispatcher.lock().await;
+        st.tools.states.clear();
+    }
+    if let Ok(mut g) = tools.lock() {
+        *g = "[]".to_string();
+    }
+}
+
+/// Снимок активных тулов для ленты чата.
+async fn refresh_tools_json(
+    dispatcher: &event::dispatcher::SharedState,
+    tools: &Arc<std::sync::Mutex<String>>,
+) {
+    let st = dispatcher.lock().await;
+    let states = &st.tools.states;
+    let arr: Vec<serde_json::Value> = states
+        .iter()
+        .map(|(call_id, e)| {
+            serde_json::json!({
+                "id": call_id,
+                "name": e.name,
+                "status": e.state.ui_status(),
+                "text": e.state.description(),
+            })
+        })
+        .collect();
+    drop(st);
+    let tj = serde_json::Value::Array(arr).to_string();
+    if tj.len() > 2 {
+        log::info!("DBG tools snapshot: {tj}");
+    }
+    if let Ok(mut g) = tools.lock() {
+        *g = tj;
+    }
+}
+
+/// Снимок запросов разрешений для диалога.
+async fn refresh_permissions_json(
+    dispatcher: &event::dispatcher::SharedState,
+    permissions: &Arc<std::sync::Mutex<String>>,
+) {
+    let st = dispatcher.lock().await;
+    let pending = &st.permissions.pending;
+    let arr: Vec<serde_json::Value> = pending
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id,
+                "sessionID": p.sessionID,
+                "action": p.action,
+                "resources": p.resources,
+                "metadata": p.metadata.as_ref().map(|m| m.to_string()).unwrap_or_default(),
+                "options": [
+                    { "label": "Разрешить один раз", "value": "once" },
+                    { "label": "Всегда разрешать", "value": "always" },
+                    { "label": "Запретить", "value": "reject" },
+                ],
+            })
+        })
+        .collect();
+    drop(st);
+    let pj = serde_json::Value::Array(arr).to_string();
+    if pj.len() > 2 {
+        log::info!("DBG perms snapshot: {pj}");
+    }
+    if let Ok(mut g) = permissions.lock() {
+        *g = pj;
     }
 }

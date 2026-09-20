@@ -64,8 +64,9 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
             true
         }
         Event::MessagePartUpdated { properties } => {
-            if let crate::types::message::Part::Tool { callID, state: ts, .. } = &properties.part {
-                state.tools.upsert(callID.clone(), ts.clone());
+            if let crate::types::message::Part::Tool { callID, tool, state: ts, .. } = &properties.part
+            {
+                state.tools.upsert(callID.clone(), tool.clone(), ts.clone());
             }
             true
         }
