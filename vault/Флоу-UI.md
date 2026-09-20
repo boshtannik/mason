@@ -91,11 +91,14 @@
 │ [ Проверить ] ● = ок                  │
 │                                       │
 │ ГОЛОС (STT/TTS)                       │
-│ Whisper: /models/whisper/base         │
-│ [ Скачать ] [ Выбрать ]             │
-│ Piper: /models/piper/russian          │
-│ [ Скачать ] [ Выбрать ]             │
-│ Язык: Русский                         │
+│ ▶ Voice models                       │
+│    (кнопка → окно VoiceModelsPage:   │
+│    фильтр языка, секции Downloaded / │
+│    Recognition / Synthesis,          │
+│    скачать/отмена/выбор/удаление)    │
+│ Recognition: whisper · Russian       │
+│ Synthesiser: piper · Dimitri         │
+│ Язык: Русский                        │
 │                                       │
 │ ИНТЕРФЕЙС                             │
 │ Язык: English                         │
