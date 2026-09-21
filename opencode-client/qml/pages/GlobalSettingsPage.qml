@@ -6,6 +6,17 @@ Item {
 
     property var appWindow
 
+    // Синхронизация дропдауна позиции PTT. Биндинг currentIndex ломается
+    // при ручном выборе пункта меню, поэтому индекс ставим явно.
+    readonly property var pttPositions: ["left", "center", "right"]
+    function syncPttCombo() {
+        var v = pttPosCombo.available
+        var idx = v.indexOf(appWindow.pttPosition)
+        if (idx < 0)
+            idx = 0
+        pttPosCombo.currentIndex = idx
+    }
+
     SilicaFlickable {
         anchors.fill: parent
         contentHeight: pageHeader.height + column.height + Theme.paddingLarge
@@ -35,23 +46,42 @@ Item {
                 }
                 onCurrentIndexChanged: {
                     var v = ["text", "text_ptt", "voice"]
-                    if (currentIndex >= 0 && currentIndex < v.length)
+                    if (currentIndex >= 0 && currentIndex < v.length) {
                         appWindow.inputMode = v[currentIndex]
+                        // Для text_ptt кнопка диктовки может быть только слева
+                        // или справа от инпута — центр недопустим.
+                        if (v[currentIndex] === "text_ptt"
+                            && appWindow.pttPosition === "center")
+                            appWindow.pttPosition = "left"
+                        // Дропдаун позиции PTT пересчитывает доступные пункты.
+                        globalSettingsPage.syncPttCombo()
+                    }
                 }
             }
 
             ComboBox {
+                id: pttPosCombo
                 label: qsTr("PTT button position")
-                currentIndex: ["left", "right"].indexOf(appWindow.pttPosition)
+                // Центр доступен только в режиме «Только диктовка».
+                property var available: appWindow.inputMode === "voice"
+                                        ? globalSettingsPage.pttPositions
+                                        : ["left", "right"]
+                currentIndex: 0
                 menu: ContextMenu {
                     MenuItem { text: qsTr("Left") }
+                    MenuItem {
+                        text: qsTr("Center")
+                        // В text_ptt центр недопустим — прячем пункт.
+                        visible: appWindow.inputMode === "voice"
+                    }
                     MenuItem { text: qsTr("Right") }
                 }
                 onCurrentIndexChanged: {
-                    var v = ["left", "right"]
+                    var v = pttPosCombo.available
                     if (currentIndex >= 0 && currentIndex < v.length)
                         appWindow.pttPosition = v[currentIndex]
                 }
+                Component.onCompleted: globalSettingsPage.syncPttCombo()
             }
 
             SectionHeader { text: qsTr("Voice") }
@@ -194,8 +224,7 @@ Item {
                 delegate: ListItem {
                     contentHeight: Theme.itemSizeSmall
                     onClicked: {
-                        soundPickerPage.appWindow.setDingSound(modelData.path)
-                        soundPickerPage.appWindow.playDing()
+                        soundPickerPage.appWindow.previewDing(modelData.path)
                     }
                     Label {
                         x: Theme.horizontalPageMargin

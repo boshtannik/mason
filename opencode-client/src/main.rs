@@ -87,6 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
 
     let (url_tx, url_rx) = mpsc::channel::<Option<String>>();
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let env_base = std::env::var("OPENCODE_SERVER_URL").ok();
     let env_auth = std::env::var("OPENCODE_SERVER_PASSWORD").ok().map(|pw| {
         let user =
@@ -111,7 +112,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_dispatcher = dispatcher.clone();
     let worker_base = env_base.clone();
     let worker_auth = env_auth.clone();
-    std::thread::Builder::new()
+    let worker_stop_rx = stop_rx;
+    let worker = std::thread::Builder::new()
         .name("opencode-worker".into())
         .spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -150,11 +152,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_voice,
                             worker_tools,
                             worker_permissions,
+                            worker_stop_rx,
                         )
                         .await
                     }
                     None => set_status(&worker_status, "error"),
                 }
+                // Drop для guard случится здесь: после выходного сигнала.
                 drop(guard);
             });
         })
@@ -173,6 +177,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.exec();
 
     log::info!("QML закрыт, выходим");
+
+    // Даём воркеру время выйти из SSE-цикла и разрушить ServerGuard
+    // (kill serve), иначе процесс умрёт без Drop и serve осиротеет.
+    let _ = stop_tx.send(true);
+    let _ = worker.join();
+    log::info!("воркер остановлен, opencode serve освобождён");
     Ok(())
 }
 
@@ -195,33 +205,40 @@ async fn run_worker(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
+    mut stop_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     loop {
-        match run_stream(
-            base.clone(),
-            auth.clone(),
-            dispatcher.clone(),
-            worker_pending.clone(),
-            worker_prompts.clone(),
-            status.clone(),
-            sessions.clone(),
-            commands.clone(),
-            current_session.clone(),
-            nav.clone(),
-            todos.clone(),
-            models.clone(),
-            sounds.clone(),
-            voice.clone(),
-            tools.clone(),
-            permissions.clone(),
-        )
-        .await
-        {
-            Ok(()) => log::warn!("SSE поток завершился, переподключаюсь…"),
-            Err(e) => log::error!("SSE ошибка: {e}, переподключаюсь…"),
+        tokio::select! {
+            _ = stop_rx.changed() => {
+                log::info!("получен сигнал остановки, выходим");
+                return;
+            }
+            r = run_stream(
+                base.clone(),
+                auth.clone(),
+                dispatcher.clone(),
+                worker_pending.clone(),
+                worker_prompts.clone(),
+                status.clone(),
+                sessions.clone(),
+                commands.clone(),
+                current_session.clone(),
+                nav.clone(),
+                todos.clone(),
+                models.clone(),
+                sounds.clone(),
+                voice.clone(),
+                tools.clone(),
+                permissions.clone(),
+            ) => {
+                match r {
+                    Ok(()) => log::warn!("SSE поток завершился, переподключаюсь…"),
+                    Err(e) => log::error!("SSE ошибка: {e}, переподключаюсь…"),
+                }
+                set_status(&status, "connecting");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
         }
-        set_status(&status, "connecting");
-        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }
 

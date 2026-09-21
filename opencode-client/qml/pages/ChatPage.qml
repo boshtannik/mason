@@ -8,7 +8,6 @@ Item {
     property var appWindow
 
     readonly property bool busy: appWindow.statusText === "busy"
-    readonly property bool micRight: appWindow.pttPosition === "right"
 
     // ms (unix) → «HH:MM» местного времени.
     function tsLabel(ms) {
@@ -17,6 +16,17 @@ Item {
         var d = new Date(Number(ms))
         var h = d.getHours(), m = d.getMinutes()
         return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m
+    }
+
+    Connections {
+        target: chatPage.appWindow
+        onDictated: {
+            if (text === "" || text === undefined)
+                return
+            var cur = input.text
+            input.text = (cur.length > 0 ? cur + " " : "") + text
+            input.focus = true
+        }
     }
 
     StatusHeader {
@@ -119,31 +129,164 @@ Item {
             right: parent.right
             bottom: parent.bottom
         }
-        height: Math.max(input.implicitHeight, mic.implicitHeight, send.implicitHeight)
-                + Theme.paddingMedium
+        height: input.visible
+                ? (Math.max(input.height, Theme.itemSizeMedium)
+                   + Theme.paddingMedium)
+                : (Theme.itemSizeMedium + Theme.paddingMedium)
+
+        // Максимальная высота поля ввода: 3 строки, чтобы не закрывало весь чат.
+        readonly property real maxInputHeight:
+            Theme.fontSizeSmall * 3 + Theme.paddingMedium * 2
+
+        // ── Константные раскладки панели ввода ──────────────────────────────
+        // Вариантов мало — задаём каждый явно через State (анкеры), без
+        // вычисления координат (расстановка «плавающими» X ломалась).
+        //  - text:      [input, send]
+        //  - ptt left:  [mic, input, send]
+        //  - ptt center:[input, mic, send]
+        //  - ptt right: [input, mic, send]  (mic у кнопки send)
+        //  - voice left/center/right: [mic, send] / [mic·центр, send] / [mic, send]
+        property string layoutKey: {
+            if (appWindow.inputMode === "voice")
+                return "voice" + appWindow.pttPosition
+            if (appWindow.inputMode === "text")
+                return "text"
+            // В режиме «текст + диктовка» центр недопустим (только слева/справа).
+            if (appWindow.pttPosition === "center")
+                return "pttleft"
+            return "ptt" + appWindow.pttPosition
+        }
+        states: [
+            State {
+                name: "text"
+                when: inputPanel.layoutKey === "text"
+                AnchorChanges {
+                    target: input
+                    anchors.left: inputPanel.left
+                    anchors.right: send.left
+                }
+                PropertyChanges { target: input; anchors.leftMargin: Theme.paddingSmall }
+                PropertyChanges { target: input; anchors.rightMargin: Theme.paddingSmall }
+            },
+            State {
+                name: "pttleft"
+                when: inputPanel.layoutKey === "pttleft"
+                AnchorChanges {
+                    target: mic
+                    anchors.left: inputPanel.left
+                }
+                AnchorChanges {
+                    target: input
+                    anchors.left: mic.right
+                    anchors.right: send.left
+                }
+                PropertyChanges { target: mic; visible: true }
+                PropertyChanges { target: mic; anchors.leftMargin: Theme.paddingSmall }
+                PropertyChanges { target: input; anchors.leftMargin: Theme.paddingSmall }
+                PropertyChanges { target: input; anchors.rightMargin: Theme.paddingSmall }
+            },
+            State {
+                name: "pttcenter"
+                when: inputPanel.layoutKey === "pttcenter"
+                AnchorChanges {
+                    target: mic
+                    anchors.horizontalCenter: inputPanel.horizontalCenter
+                }
+                AnchorChanges {
+                    target: input
+                    anchors.left: inputPanel.left
+                    anchors.right: mic.left
+                }
+                PropertyChanges { target: mic; visible: true }
+                PropertyChanges { target: input; anchors.leftMargin: Theme.paddingSmall }
+                PropertyChanges { target: input; anchors.rightMargin: Theme.paddingSmall }
+            },
+            State {
+                name: "pttright"
+                when: inputPanel.layoutKey === "pttright"
+                AnchorChanges {
+                    target: mic
+                    anchors.right: send.left
+                }
+                AnchorChanges {
+                    target: input
+                    anchors.left: inputPanel.left
+                    anchors.right: mic.left
+                }
+                PropertyChanges { target: mic; visible: true }
+                PropertyChanges { target: mic; anchors.rightMargin: Theme.paddingSmall }
+                PropertyChanges { target: input; anchors.leftMargin: Theme.paddingSmall }
+                PropertyChanges { target: input; anchors.rightMargin: Theme.paddingSmall }
+            },
+            State {
+                name: "voiceleft"
+                when: inputPanel.layoutKey === "voiceleft"
+                AnchorChanges {
+                    target: mic
+                    anchors.left: inputPanel.left
+                }
+                PropertyChanges { target: mic; visible: true }
+                PropertyChanges { target: mic; anchors.leftMargin: Theme.paddingSmall }
+            },
+            State {
+                name: "voicecenter"
+                when: inputPanel.layoutKey === "voicecenter"
+                AnchorChanges {
+                    target: mic
+                    anchors.horizontalCenter: inputPanel.horizontalCenter
+                }
+                PropertyChanges { target: mic; visible: true }
+            },
+            State {
+                name: "voiceright"
+                when: inputPanel.layoutKey === "voiceright"
+                AnchorChanges {
+                    target: mic
+                    anchors.right: send.left
+                }
+                PropertyChanges { target: mic; visible: true }
+                PropertyChanges { target: mic; anchors.rightMargin: Theme.paddingSmall }
+            }
+        ]
 
         IconButton {
             id: mic
-            visible: appWindow.inputMode !== "text" && !chatPage.busy
-            anchors {
-                left: chatPage.micRight ? undefined : parent.left
-                leftMargin: chatPage.micRight ? 0 : Theme.paddingSmall
-                right: chatPage.micRight ? send.left : undefined
-                rightMargin: chatPage.micRight ? Theme.paddingSmall : 0
-                verticalCenter: parent.verticalCenter
+            visible: false
+            width: Theme.itemSizeMedium
+            height: Theme.itemSizeMedium
+            anchors.bottom: inputPanel.bottom
+            anchors.bottomMargin: Theme.paddingSmall
+            // Горизонтальную привязку задаёт только state (left/центр/right),
+            // чтобы не возникало конфликта анкеров при центровке.
+            icon.source: (appWindow.recording || appWindow.recognizing)
+                          ? "" : "image://theme/icon-m-mic"
+
+            // Лоадер вместо иконки, пока идёт запись или распознавание.
+            BusyIndicator {
+                anchors.fill: parent
+                running: appWindow.recording || appWindow.recognizing
+                visible: running
             }
-            icon.source: appWindow.recording
-                          ? "image://theme/icon-m-stop" : "image://theme/icon-m-mic"
-            onClicked: appWindow.startPtt()
+
+            // PTT-холд: зажал → запись, отпустил → стоп + распознавание.
+            MouseArea {
+                anchors.fill: parent
+                onPressed: appWindow.startPttHold()
+                onReleased: appWindow.stopPttHold()
+                onCanceled: appWindow.stopPttHold()
+            }
         }
 
         IconButton {
             id: send
             visible: !chatPage.busy
+            width: Theme.itemSizeMedium
+            height: Theme.itemSizeMedium
             anchors {
-                right: parent.right
+                right: inputPanel.right
                 rightMargin: Theme.paddingSmall
-                verticalCenter: parent.verticalCenter
+                bottom: inputPanel.bottom
+                bottomMargin: Theme.paddingSmall
             }
             icon.source: "image://theme/icon-m-enter-accept"
             enabled: input.text.length > 0
@@ -156,30 +299,34 @@ Item {
         IconButton {
             id: stop
             visible: chatPage.busy
+            width: Theme.itemSizeMedium
+            height: Theme.itemSizeMedium
             anchors {
-                right: parent.right
+                right: inputPanel.right
                 rightMargin: Theme.paddingSmall
-                verticalCenter: parent.verticalCenter
+                bottom: inputPanel.bottom
+                bottomMargin: Theme.paddingSmall
             }
             icon.source: "image://theme/icon-m-stop"
             onClicked: appWindow.stopAgent()
         }
 
-        TextField {
+        TextArea {
             id: input
             visible: appWindow.inputMode !== "voice"
             enabled: !chatPage.busy
-            anchors {
-                left: chatPage.micRight
-                      ? parent.left
-                      : (mic.visible ? mic.right : parent.left)
-                right: chatPage.busy
-                       ? stop.left
-                       : (chatPage.micRight ? mic.left : send.left)
-                leftMargin: Theme.paddingSmall
-                rightMargin: Theme.paddingSmall
-                verticalCenter: parent.verticalCenter
-            }
+            background: null
+            horizontalAlignment: Text.AlignLeft
+            // Высота растёт до 3 строк, дальше не растёт.
+            height: Math.min(implicitHeight, inputPanel.maxInputHeight)
+            anchors.bottom: inputPanel.bottom
+            anchors.bottomMargin: Theme.paddingSmall
+            // Дефолтные анкеры (ширина в стартовой раскладке [input, send]);
+            // state переопределяет их под выбранную схему.
+            anchors.left: inputPanel.left
+            anchors.leftMargin: Theme.paddingSmall
+            anchors.right: send.left
+            anchors.rightMargin: Theme.paddingSmall
             placeholderText: chatPage.busy
                              ? qsTr("Агент работает…")
                              : qsTr("Промпт агенту…")

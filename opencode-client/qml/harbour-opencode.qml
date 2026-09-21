@@ -11,18 +11,31 @@ ApplicationWindow {
 
     property var messages: []
     property string statusText: "connecting"
-    property string inputMode: "text_ptt"
+    property string inputMode: inputModeSetting.value !== undefined
+                               ? inputModeSetting.value : "text_ptt"
     property var sessions: []
     property var todos: []
     property var models: []
     property string currentSessionId: ""
-    property bool showTools: true
-    property string pttPosition: "left"
-    property string ttsMode: "text"
-    property bool soundOnFinish: true
-    property bool soundOnPermission: true
-    property bool sendImmediately: false
-    property string uiLanguage: "ru"
+    property bool showTools: showToolsSetting.value !== undefined
+                            ? showToolsSetting.value : true
+    property string pttPosition: pttPositionSetting.value !== undefined
+                                 ? pttPositionSetting.value : "left"
+    property string ttsMode: ttsModeSetting.value !== undefined
+                             ? ttsModeSetting.value : "text"
+    property bool soundOnFinish: soundOnFinishSetting.value !== undefined
+                                 ? soundOnFinishSetting.value : true
+    property bool soundOnPermission: soundOnPermissionSetting.value !== undefined
+                                     ? soundOnPermissionSetting.value : true
+    property bool sendImmediately: sendImmediatelySetting.value !== undefined
+                                   ? sendImmediatelySetting.value : false
+    property string uiLanguage: uiLanguageSetting.value !== undefined
+                                ? uiLanguageSetting.value : "ru"
+    // Ожидающие запросы разрешений агента (`[{id,sessionID,action,resources,options}]`).
+    property var pendingPermissions: []
+    // Дать согласие «Разрешить один раз»: true, если запрос действительно новый
+    // (для срабатывания звука только на появившихся).
+    property var knownPermissionIds: []
     property bool sttModelReady: false
     property bool ttsModelReady: false
 
@@ -42,6 +55,8 @@ ApplicationWindow {
     property string voiceLang: "auto"
     // Идёт ли запись с микрофона (PTT-переключатель).
     property bool recording: false
+    // Идёт ли распознавание речи после остановки записи.
+    property bool recognizing: false
 
     // Протокольные константы голосового модуля.
     // Команды зеркалят `voice::cmd` в src/voice.rs, движки — `voice::engine`,
@@ -64,9 +79,45 @@ ApplicationWindow {
     // Запрос переключить страницу карусели (0..3).
     signal requestPage(int index)
 
+    // Распознанный речевой текст, который надо показать в поле ввода чата.
+    signal dictated(string text)
+
     ConfigurationValue {
         id: dingSetting
         key: "/apps/harbour-opencode/dingSound"
+    }
+
+    ConfigurationValue {
+        id: inputModeSetting
+        key: "/apps/harbour-opencode/inputMode"
+    }
+    ConfigurationValue {
+        id: showToolsSetting
+        key: "/apps/harbour-opencode/showTools"
+    }
+    ConfigurationValue {
+        id: pttPositionSetting
+        key: "/apps/harbour-opencode/pttPosition"
+    }
+    ConfigurationValue {
+        id: ttsModeSetting
+        key: "/apps/harbour-opencode/ttsMode"
+    }
+    ConfigurationValue {
+        id: soundOnFinishSetting
+        key: "/apps/harbour-opencode/soundOnFinish"
+    }
+    ConfigurationValue {
+        id: soundOnPermissionSetting
+        key: "/apps/harbour-opencode/soundOnPermission"
+    }
+    ConfigurationValue {
+        id: sendImmediatelySetting
+        key: "/apps/harbour-opencode/sendImmediately"
+    }
+    ConfigurationValue {
+        id: uiLanguageSetting
+        key: "/apps/harbour-opencode/uiLanguage"
     }
 
     // Держим процесс живым, пока агент работает (иначе Sailfish усыпит его в фоне).
@@ -115,12 +166,37 @@ ApplicationWindow {
             for (var i = 0; i < lines.length; i++) {
                 var line = lines[i]
                 if (line !== "") {
-                    // Распознанное (STT) — юзер-баббл справа с таймстампом.
-                    if (line.substring(0, 7) === "[[stt]]") {
-                        line = line.substring(7).replace(/^\s+/, "")
-                        if (line !== "")
-                            line = "[[t:" + Date.now() + "]]>>> " + line
+                    // Ошибка сервера (например "free usage exceeded") — сразу в нотификацию,
+                    // чтобы не выглядело, будто агент молча работает.
+                    if (line.indexOf("[ошибка сервера]") === 0) {
+                        app.recognizing = false
+                        var errText = line.substring("[ошибка сервера]".length).replace(/^\s+/, "")
+                        app.publishError(errText)
                     }
+
+                    // Терминальный результат распознавания — снимаем лоадер.
+                    if (line.substring(0, 7) === "[[stt]]"
+                        || line.indexOf("[голос] ошибка") === 0
+                        || line.indexOf("[голос] распознано пусто") === 0
+                        || line.indexOf("[голос] модель не скачана") === 0)
+                        app.recognizing = false
+
+                    // Распознанное (STT): в инпут или сразу агенту — по настройкам.
+                    if (line.substring(0, 7) === "[[stt]]") {
+                        var text = line.substring(7).replace(/^\s+/, "")
+                        if (text !== "") {
+                            if (app.inputMode === "voice" || app.sendImmediately) {
+                                // Баббл в acc: после цикла идёт app.messages = acc,
+                                // иначе добавленный send() баббл затёрся бы.
+                                acc = acc.concat("[[t:" + Date.now() + "]]>>> " + text)
+                                bridge.send_prompt(text)
+                            } else {
+                                app.dictated(text)
+                            }
+                        }
+                        continue
+                    }
+
                     acc = acc.concat(line)
                 }
             }
@@ -185,6 +261,28 @@ ApplicationWindow {
                 console.log("voice parse error: " + e)
             }
         }
+        var pj = bridge.permissions_json()
+        if (pj !== "" && pj !== undefined) {
+            try {
+                var parsed = JSON.parse(pj)
+                app.pendingPermissions = parsed
+                // Новые запросы (ещё не показанные) — просигналить пользователю.
+                var fresh = false
+                for (var pi = 0; pi < parsed.length; pi++) {
+                    var pid = parsed[pi].id
+                    if (app.knownPermissionIds.indexOf(pid) < 0) {
+                        app.knownPermissionIds = app.knownPermissionIds.concat(pid)
+                        fresh = true
+                    }
+                }
+                if (fresh) {
+                    app.notifyPermission()
+                    app.showPermissionOverlay()
+                }
+            } catch (e) {
+                console.log("permissions parse error: " + e)
+            }
+        }
     }
 
     function statusColor(s) {
@@ -213,12 +311,17 @@ ApplicationWindow {
     function voiceCmd(cmd, val) {
         bridge.voice_command(cmd, val === undefined ? "" : val)
     }
-    function startPtt() {
+    function startPttHold() {
         if (!app.recording) {
+            app.recognizing = false
             app.recording = true
             app.voiceCmd(app.cmdRecordStart, "")
-        } else {
+        }
+    }
+    function stopPttHold() {
+        if (app.recording) {
             app.recording = false
+            app.recognizing = true
             app.voiceCmd(app.cmdRecordStop, "")
         }
     }
@@ -276,6 +379,10 @@ ApplicationWindow {
         bridge.delete_session(id)
     }
 
+    function deleteAllSessions() {
+        bridge.delete_all_sessions()
+    }
+
     function forkSession(id) {
         app.messages = []
         app.currentSessionId = ""
@@ -288,18 +395,60 @@ ApplicationWindow {
     function abortSession(id) { bridge.abort_session(id) }
     function setModel(id, provider, model) { bridge.set_model(id, provider, model) }
 
+    onInputModeChanged: { inputModeSetting.value = app.inputMode; inputModeSetting.sync() }
+    onShowToolsChanged: { showToolsSetting.value = app.showTools; showToolsSetting.sync() }
+    onPttPositionChanged: { pttPositionSetting.value = app.pttPosition; pttPositionSetting.sync() }
+    onTtsModeChanged: { ttsModeSetting.value = app.ttsMode; ttsModeSetting.sync() }
+    onSoundOnFinishChanged: { soundOnFinishSetting.value = app.soundOnFinish; soundOnFinishSetting.sync() }
+    onSoundOnPermissionChanged: { soundOnPermissionSetting.value = app.soundOnPermission; soundOnPermissionSetting.sync() }
+    onSendImmediatelyChanged: { sendImmediatelySetting.value = app.sendImmediately; sendImmediatelySetting.sync() }
+    onUiLanguageChanged: { uiLanguageSetting.value = app.uiLanguage; uiLanguageSetting.sync() }
+    onDingSoundChanged: { if (app.dingSound) dingSetting.value = app.dingSound; dingSetting.sync() }
+
     function playDing() {
         var slots = [ding1, ding2, ding3, ding4]
-        var slot = slots[app.dingSlot]
-        app.dingSlot = (app.dingSlot + 1) % slots.length
+        var slot = null
+        for (var i = 0; i < slots.length; i++) {
+            var s = slots[(app.dingSlot + i) % slots.length]
+            if (!s.playing) {
+                slot = s
+                app.dingSlot = (app.dingSlot + i + 1) % slots.length
+                break
+            }
+        }
+        if (!slot) {
+            slot = slots[app.dingSlot]
+            slot.stop()
+            app.dingSlot = (app.dingSlot + 1) % slots.length
+        }
         slot.source = app.dingSound
         slot.play()
+    }
+
+    function stopDing() {
+        var slots = [ding1, ding2, ding3, ding4]
+        for (var i = 0; i < slots.length; i++)
+            slots[i].stop()
     }
 
     function setDingSound(path) {
         app.dingSound = path
         dingSetting.value = path
         dingSetting.sync()
+    }
+
+    // Превью выбранной мелодии: сначала глушим все слоты, затем играем
+    // с небольшой паузой — мгновенный play после stop часто не срабатывает
+    // (звук «через раз»).
+    Timer {
+        id: dingPreviewTimer
+        interval: 80
+        onTriggered: app.playDing()
+    }
+    function previewDing(path) {
+        app.setDingSound(path)
+        app.stopDing()
+        dingPreviewTimer.start()
     }
 
     function dingSoundName() {
@@ -316,6 +465,14 @@ ApplicationWindow {
         notify.previewBody = body
         notify.sound = app.dingSound
         notify.publish()
+    }
+
+    // Ошибка сервера: всегда видимое уведомление + статус.
+    function publishError(msg) {
+        app.statusText = "error"
+        if (msg === "") msg = qsTr("Ошибка сервера")
+        app.playDing()
+        app.publishNotification(qsTr("Ошибка сервера"), msg)
     }
 
     function notifyAgentFinished() {
@@ -342,6 +499,17 @@ ApplicationWindow {
             app.abortSession(app.currentSessionId)
     }
 
+    // Ответ на запрос разрешения агента: once / always / reject.
+    function answerPermission(session, id, response) {
+        bridge.answer_permission(session, id, response)
+    }
+
+    // показать/скрыть оверлей с запросом разрешения.
+    property bool permissionOverlayVisible: false
+    function showPermissionOverlay() {
+        app.permissionOverlayVisible = app.pendingPermissions.length > 0
+    }
+
     initialPage: Component {
         Page {
             Connections {
@@ -355,6 +523,7 @@ ApplicationWindow {
                 id: pager
                 anchors.fill: parent
                 currentIndex: 2
+                wrapMode: PagedView.NoWrap
                 model: [globalPage, sessionsPage, chatPage, sessionSettingsPage]
 
                 delegate: Item {
@@ -391,6 +560,80 @@ ApplicationWindow {
                         height: width
                         radius: width / 2
                         color: index === pager.currentIndex ? Theme.primaryColor : Theme.secondaryColor
+                    }
+                }
+            }
+
+            // Оверлей запроса разрешения от агента (поверх карусели).
+            Rectangle {
+                id: permissionOverlay
+                visible: app.permissionOverlayVisible && app.pendingPermissions.length > 0
+                anchors.fill: parent
+                color: "black"
+                opacity: 0.55
+                z: 20
+
+                Column {
+                    id: permissionCol
+                    anchors.centerIn: parent
+                    width: parent.width - 2 * Theme.horizontalPageMargin
+                    spacing: Theme.paddingMedium
+
+                    Label {
+                        text: qsTr("Агент запрашивает разрешение")
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        color: Theme.primaryColor
+                        font.pixelSize: Theme.fontSizeMedium
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        text: app.pendingPermissions[0]
+                              ? (app.pendingPermissions[0].action || "")
+                                + (app.pendingPermissions[0].resources
+                                   ? (": " + app.pendingPermissions[0].resources
+                                        .map(function (r) { return r }).join(", "))
+                                   : "")
+                              : ""
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        color: Theme.secondaryHighlightColor
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.Wrap
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
+
+                    Button {
+                        text: qsTr("Разрешить один раз")
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        onClicked: {
+                            app.answerPermission(
+                                app.pendingPermissions[0].sessionID,
+                                app.pendingPermissions[0].id,
+                                "once")
+                            app.permissionOverlayVisible = false
+                        }
+                    }
+                    Button {
+                        text: qsTr("Всегда разрешать")
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        onClicked: {
+                            app.answerPermission(
+                                app.pendingPermissions[0].sessionID,
+                                app.pendingPermissions[0].id,
+                                "always")
+                            app.permissionOverlayVisible = false
+                        }
+                    }
+                    Button {
+                        text: qsTr("Запретить")
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        onClicked: {
+                            app.answerPermission(
+                                app.pendingPermissions[0].sessionID,
+                                app.pendingPermissions[0].id,
+                                "reject")
+                            app.permissionOverlayVisible = false
+                        }
                     }
                 }
             }

@@ -46,7 +46,9 @@ Item {
                     text: qsTr("Удалить")
                     onClicked: {
                         var sid = modelData.id
-                        remorse.execute(qsTr("Удаление сессии"), function() {
+                        // Полоса отсчёта — на самой строке, чтобы сразу можно было
+                        // удалить несколько сессий подряд (RemorsePopup блокировал экран).
+                        item.showRemorse(qsTr("Удаление сессии"), function() {
                             appWindow.deleteSession(sid)
                         })
                     }

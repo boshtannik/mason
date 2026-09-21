@@ -692,6 +692,27 @@ pub async fn start_recording(voice: &Arc<VoiceState>) {
     }
 }
 
+/// Найти первую скачанную модель движка (для автозамены после удаления).
+fn replacement_model(exclude_id: &str, engine: &str) -> Option<String> {
+    let cat = load_catalog();
+    let models = cat["models"].as_array()?;
+    for m in models {
+        let id = m["model_id"].as_str()?;
+        if id == exclude_id {
+            continue;
+        }
+        if m["engine"].as_str() != Some(engine) {
+            continue;
+        }
+        let dir = model_dir(id);
+        if !all_present(&dir, &model_files(m)) {
+            continue;
+        }
+        return Some(id.to_string());
+    }
+    None
+}
+
 /// STT-точка из QML: спонсит задачу транскрипции.
 pub async fn stt_from_call(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
     let voice2 = voice.clone();
@@ -915,18 +936,33 @@ pub async fn run_command(
                     Ok(()) => log::info!("модель {id} удалена ({})", dir.display()),
                     Err(e) => log::warn!("не удалилась {id}: {e}"),
                 }
-                // Если удалили выбранную модель — снимаем выбор.
+                // Если удалили выбранную модель — снимаем выбор и подбираем замену
+                // (чтобы юзер понимал, какой моделью теперь распознаёт/синтезирует).
                 let cur = voice.stt_model.lock().map(|g| g.clone()).unwrap_or_default();
                 let cur2 = voice.tts_model.lock().map(|g| g.clone()).unwrap_or_default();
+                let mut note: Option<String> = None;
                 if cur == id {
+                    let repl = replacement_model(&cur, "whisper");
                     if let Ok(mut g) = voice.stt_model.lock() {
-                        *g = String::new();
+                        *g = repl.clone().unwrap_or_default();
                     }
+                    note = Some(match repl {
+                        Some(r) => format!("[голос] выбрана STT-модель {r}"),
+                        None => "[голос] STT-моделей нет — скачайте новую".to_string(),
+                    });
                 }
                 if cur2 == id {
+                    let repl = replacement_model(&cur2, "piper");
                     if let Ok(mut g) = voice.tts_model.lock() {
-                        *g = String::new();
+                        *g = repl.clone().unwrap_or_default();
                     }
+                    note = match repl {
+                        Some(r) => Some(format!("[голос] выбрана TTS-модель {r}")),
+                        None => Some("[голос] TTS-моделей нет — скачайте новую".to_string()),
+                    };
+                }
+                if let (Some(n), Ok(mut q)) = (note, pending.lock()) {
+                    q.push(n);
                 }
                 voice.persist();
                 voice.refresh_status();

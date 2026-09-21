@@ -79,6 +79,8 @@ install -Dm 644 harbour-opencode.png -t %{buildroot}%{_datadir}/icons/hicolor/86
 install -Dm 644 harbour-opencode.desktop -t %{buildroot}%{_datadir}/applications
 install -d %{buildroot}%{_datadir}/%{name}
 cp -r opencode-client/qml %{buildroot}%{_datadir}/%{name}/qml
+# do-probe.sh нужен исполняемым (при копировании бит не гарантируется).
+chmod +x %{buildroot}%{_datadir}/%{name}/qml/do-probe.sh
 
 desktop-file-install --delete-original    \
   --dir %{buildroot}%{_datadir}/applications    \
