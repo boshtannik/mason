@@ -581,6 +581,15 @@ pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec
     let lang = if lang.is_empty() { "auto".to_string() } else { lang };
     let wav = format!("{REC_RAW}.wav");
     log::info!("STT: модель={id} lang={lang} файл={wav}");
+    // FUTO-подход: audio_ctx подрезаем под реальную длину записи (кадр 320 сэмплов,
+    // +32 кадров на декодер), потоки по числу ядер. Один общий бинарь, без DOTPROD.
+    let audio_ctx = std::fs::metadata(&wav)
+        .map(|m| (m.len().saturating_sub(44) / 2) as usize) // samples из 16-бит PCM
+        .map(|samples| samples / 320 + 32)
+        .map(|ctx| ctx.clamp(272, 1500))
+        .unwrap_or(0);
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
+    log::info!("STT: audio_ctx={audio_ctx} threads={threads}");
     if let Ok(mut q) = pending.lock() {
         q.push("[голос] распознаю…".to_string());
     }
@@ -589,8 +598,9 @@ pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec
         .arg("-m").arg(&model_file)
         .arg("-f").arg(&wav)
         .arg("-l").arg(&lang)
-        .arg("-t").arg("4")
+        .arg("-t").arg(threads.to_string())
         .arg("-nt")
+        .arg("-c").arg(audio_ctx.to_string())
         .output()
         .await
     {

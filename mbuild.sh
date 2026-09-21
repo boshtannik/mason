@@ -64,6 +64,13 @@ docker run --rm \
   fi
   mkdir -p third_party
   ln -sfn "$HOME/cargo-cache/whisper.cpp" third_party/whisper.cpp
+  # Патч к whisper-cli: добавляет CLI-опцию --audio-ctx (FUTO-подход к скорости).
+  if ! grep -qF -- '--audio-ctx' third_party/whisper.cpp/examples/main/main.cpp; then
+    patch -p1 -d third_party/whisper.cpp < /src/packaging/whisper-cli-audio-ctx.patch
+    echo "whisper-cli: патч --audio-ctx применён"
+  else
+    echo "whisper-cli: патч --audio-ctx уже применён"
+  fi
   ls -d third_party/whisper.cpp
   # Piper (TTS): готовая статическая сборка под aarch64 (эталон) — распаковываем
   # в кэш, дальше spec ставит её в /usr/libexec/harbour-opencode/piper/.
