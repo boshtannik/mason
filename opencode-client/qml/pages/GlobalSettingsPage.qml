@@ -191,17 +191,23 @@ Item {
 
             SectionHeader { text: qsTr("Interface") }
 
+            // Языки интерфейса: только те, что полностью переведены (i18n/{lang}.json).
+            // Сейчас полностью заполнен только английский, ru-заглушка не показывается.
             ComboBox {
                 label: qsTr("Language")
-                currentIndex: ["en", "ru"].indexOf(appWindow.uiLanguage)
+                currentIndex: ["en"].indexOf(appWindow.uiLanguage)
                 menu: ContextMenu {
                     MenuItem { text: qsTr("English") }
-                    MenuItem { text: qsTr("Русский") }
                 }
                 onCurrentIndexChanged: {
-                    var v = ["en", "ru"]
-                    if (currentIndex >= 0 && currentIndex < v.length)
-                        appWindow.uiLanguage = v[currentIndex]
+                    if (appWindow.uiLanguage !== "en")
+                        appWindow.uiLanguage = "en"
+                }
+                Component.onCompleted: {
+                    // Если в dconf сохранился несуществующий язык (например "ru") —
+                    // сбрасываем сразу, чтобы currentIndex не остался -1.
+                    if (appWindow.uiLanguage !== "en")
+                        appWindow.uiLanguage = "en"
                 }
             }
         }

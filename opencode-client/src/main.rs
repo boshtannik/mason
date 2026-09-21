@@ -292,11 +292,24 @@ async fn run_stream(
                 match item {
                     Some(Ok(ev)) => {
                         if let opencode_client::types::event::Event::SessionError { properties } = &ev.payload {
+                            // Ошибка приходит как структурированный JSON; в чат/нотификацию
+                            // отдаём только человекочитаемое сообщение, а не сырой объект.
                             let msg = properties
                                 .error
                                 .as_ref()
-                                .map(|e| e.to_string())
-                                .unwrap_or_default();
+                                .and_then(|e| {
+                                    e.pointer("/data/message")
+                                        .or_else(|| e.pointer("/message"))
+                                        .and_then(|m| m.as_str())
+                                })
+                                .map(|m| m.to_string())
+                                .unwrap_or_else(|| {
+                                    properties
+                                        .error
+                                        .as_ref()
+                                        .map(|e| e.to_string())
+                                        .unwrap_or_default()
+                                });
                             log::error!("session.error: {msg}");
                             if let Ok(mut q) = worker_pending.lock() {
                                 q.push(format!("[ошибка сервера] {msg}"));
@@ -603,6 +616,8 @@ async fn run_stream(
                                         if let Ok(mut g) = todos.lock() {
                                             *g = "[]".to_string();
                                         }
+                                        // Свежая сессия должна сразу появиться в списке сессий.
+                                        refresh_sessions(&client, &sessions).await;
                                     }
                                     None => log::error!("delete_all: нет id при создании"),
                                 },

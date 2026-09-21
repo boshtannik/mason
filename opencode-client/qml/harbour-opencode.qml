@@ -30,7 +30,7 @@ ApplicationWindow {
     property bool sendImmediately: sendImmediatelySetting.value !== undefined
                                    ? sendImmediatelySetting.value : false
     property string uiLanguage: uiLanguageSetting.value !== undefined
-                                ? uiLanguageSetting.value : "ru"
+                                ? uiLanguageSetting.value : "en"
     // Ожидающие запросы разрешений агента (`[{id,sessionID,action,resources,options}]`).
     property var pendingPermissions: []
     // Дать согласие «Разрешить один раз»: true, если запрос действительно новый
@@ -172,6 +172,7 @@ ApplicationWindow {
                         app.recognizing = false
                         var errText = line.substring("[ошибка сервера]".length).replace(/^\s+/, "")
                         app.publishError(errText)
+                        continue
                     }
 
                     // Терминальный результат распознавания — снимаем лоадер.
@@ -380,7 +381,12 @@ ApplicationWindow {
     }
 
     function deleteAllSessions() {
+        // Пустая новая сессия: сбросить ленту, иначе после delete_all останется
+        // старая история (новую сессию Rust создаёт асинхронно).
+        app.messages = []
+        app.currentSessionId = ""
         bridge.delete_all_sessions()
+        app.requestPage(2)
     }
 
     function forkSession(id) {
