@@ -66,8 +66,9 @@ test -x /home/mersdk/cargo-cache/piper-aarch64/piper/piper
 ls -l /home/mersdk/cargo-cache/piper-aarch64/piper
 
 # Переводы: .ts → .qm для каждого полностью переведённого языка.
+# При добавлении нового языка (harbour-opencode-XX.ts) допиши его сюда.
 cd ../../opencode-client/translations
-for ts in *-ru.ts; do
+for ts in harbour-opencode-ru.ts harbour-opencode-fi.ts harbour-opencode-uk.ts harbour-opencode-de.ts; do
   lrelease -qm "${ts%.ts}.qm" "$ts"
 done
 cd ../..

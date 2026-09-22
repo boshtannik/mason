@@ -1,0 +1,488 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1">
+<context>
+    <name>ChatPage</name>
+    <message>
+        <location filename="../../i18n/qml-src/pages/ChatPage.qml" line="331"/>
+        <source>Agent is working…</source>
+        <translation>Агент працює…</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/ChatPage.qml" line="332"/>
+        <source>Agent prompt…</source>
+        <translation>Підказка агенту…</translation>
+    </message>
+</context>
+<context>
+    <name>GlobalSettingsPage</name>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="26"/>
+        <source>Settings</source>
+        <translation>Налаштування</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="37"/>
+        <source>Input</source>
+        <translation>Введення</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="40"/>
+        <source>Mode</source>
+        <translation>Режим</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="43"/>
+        <source>Text only</source>
+        <translation>Тільки текст</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="44"/>
+        <source>Text + PTT</source>
+        <translation>Текст + PTT</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="45"/>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="87"/>
+        <source>Voice</source>
+        <translation>Голос</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="64"/>
+        <source>PTT button position</source>
+        <translation>Позиція кнопки PTT</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="71"/>
+        <source>Left</source>
+        <translation>Ліворуч</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="73"/>
+        <source>Center</source>
+        <translation>По центру</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="77"/>
+        <source>Right</source>
+        <translation>Праворуч</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="96"/>
+        <source>Voice models</source>
+        <translation>Голосові моделі</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="109"/>
+        <source>Recognition:
+%1
+Synthesiser:
+%2</source>
+        <translation>Розпізнавання:
+%1
+Синтез:
+%2</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="120"/>
+        <source>↓ download
+→ start using
+✓ selected
+✕ cancel
+long press — remove</source>
+        <translation>↓ завантажити
+→ використовувати
+✓ вибрано
+✕ скасувати
+довге натискання — видалити</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
+        <source>Speakers</source>
+        <translation>Динаміки</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="129"/>
+        <source>Free hands / autoplay</source>
+        <translation>Без рук / автовідтворення</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="132"/>
+        <source>Auto</source>
+        <translation>Авто</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="133"/>
+        <source>Button</source>
+        <translation>Кнопка</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="134"/>
+        <source>Off</source>
+        <translation>Вимк</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="144"/>
+        <source>Send immediately</source>
+        <translation>Надсилати одразу</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="149"/>
+        <source>Notifications</source>
+        <translation>Сповіщення</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="152"/>
+        <source>Sound when agent finishes (ding)</source>
+        <translation>Звук після завершення агента (дінь)</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="158"/>
+        <source>Sound on permission request</source>
+        <translation>Звук при запиті дозволу</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="170"/>
+        <source>Sound</source>
+        <translation>Звук</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="185"/>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="189"/>
+        <source>Test notification</source>
+        <translation>Тестове сповіщення</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="188"/>
+        <source>opencode</source>
+        <translation>opencode</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="192"/>
+        <source>Interface</source>
+        <translation>Інтерфейс</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="197"/>
+        <source>Language</source>
+        <translation>Мова</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="200"/>
+        <source>English</source>
+        <translation>Англійська</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="229"/>
+        <source>Notification sound</source>
+        <translation>Звук сповіщення</translation>
+    </message>
+</context>
+<context>
+    <name>SessionSettingsPage</name>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="24"/>
+        <source>no data</source>
+        <translation>немає даних</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="85"/>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="96"/>
+        <source>Session</source>
+        <translation>Сесія</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="104"/>
+        <source>Fork (branch)</source>
+        <translation>Форк (гілка)</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="117"/>
+        <source>Refresh link</source>
+        <translation>Оновити посилання</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="118"/>
+        <source>Share</source>
+        <translation>Поділитися</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="133"/>
+        <source>Open link</source>
+        <translation>Відкрити посилання</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="146"/>
+        <source>Copy link</source>
+        <translation>Скопіювати посилання</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="168"/>
+        <source>Session summary</source>
+        <translation>Підсумок сесії</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="188"/>
+        <source>Switch model</source>
+        <translation>Змінити модель</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="207"/>
+        <source>Compact (compress history)</source>
+        <translation>Стиснути (зменшити історію)</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="212"/>
+        <source>Compress history?</source>
+        <translation>Стиснути історію?</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="227"/>
+        <source>Abort</source>
+        <translation>Перервати</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="233"/>
+        <source>TODO tasks</source>
+        <translation>TODO-задачі</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="239"/>
+        <source>No tasks</source>
+        <translation>Задач немає</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="273"/>
+        <source>Misc</source>
+        <translation>Інше</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="276"/>
+        <source>Show tools strip</source>
+        <translation>Показувати панель інструментів</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="305"/>
+        <source>OK</source>
+        <translation>ОК</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="313"/>
+        <source>(untitled)</source>
+        <translation>(без назви)</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="329"/>
+        <source>Model: </source>
+        <translation>Модель: </translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="337"/>
+        <source>Cost: $</source>
+        <translation>Вартість: $</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="345"/>
+        <source>Tokens: </source>
+        <translation>Токени: </translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="354"/>
+        <source>Link: </source>
+        <translation>Посилання: </translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="378"/>
+        <source>Model</source>
+        <translation>Модель</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="424"/>
+        <source>No available models</source>
+        <translation>Немає доступних моделей</translation>
+    </message>
+</context>
+<context>
+    <name>SessionsPage</name>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="15"/>
+        <source>Sessions</source>
+        <translation>Сесії</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="35"/>
+        <source>Session settings</source>
+        <translation>Налаштування сесії</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="39"/>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="108"/>
+        <source>Rename</source>
+        <translation>Перейменувати</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="46"/>
+        <source>Delete</source>
+        <translation>Видалити</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="51"/>
+        <source>Delete session</source>
+        <translation>Видалення сесії</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="63"/>
+        <source>Delete all sessions</source>
+        <translation>Видалити всі сесії</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="65"/>
+        <source>Delete all sessions?</source>
+        <translation>Видалити всі сесії?</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="70"/>
+        <source>New session</source>
+        <translation>Нова сесія</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="77"/>
+        <source>No sessions yet</source>
+        <translation>Сесій поки немає</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="78"/>
+        <source>Pull down to create a new session</source>
+        <translation>Потягніть вниз, щоб створити нову сесію</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="113"/>
+        <source>Session name</source>
+        <translation>Назва сесії</translation>
+    </message>
+</context>
+<context>
+    <name>VoiceModelsPage</name>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="43"/>
+        <source>Multilingual</source>
+        <translation>Багатомовні</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="87"/>
+        <source>download failed</source>
+        <translation>помилка завантаження</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="89"/>
+        <source>downloaded</source>
+        <translation>завантажено</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="129"/>
+        <source>Downloading… %1% (%2 / %3)</source>
+        <translation>Завантаження… %1% (%2 / %3)</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="152"/>
+        <source>Downloaded models</source>
+        <translation>Завантажені моделі</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>
+        <source>Recognition</source>
+        <translation>Розпізнавання</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="163"/>
+        <source>Synthesis</source>
+        <translation>Синтез</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="240"/>
+        <source>Removing «%1»…</source>
+        <translation>Видаляємо «%1»…</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="281"/>
+        <source>Language</source>
+        <translation>Мова</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="304"/>
+        <source>On device: %1 of %2 models, %3</source>
+        <translation>На пристрої: %1 з %2 моделей, %3</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="439"/>
+        <source>Expand / collapse</source>
+        <translation>Розгорнути / згорнути</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="441"/>
+        <source>Cancel download</source>
+        <translation>Скасувати завантаження</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="442"/>
+        <source>Remove model</source>
+        <translation>Видалити модель</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="442"/>
+        <source>Download</source>
+        <translation>Завантажити</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="451"/>
+        <source>No models for the selected language</source>
+        <translation>Немає моделей для вибраної мови</translation>
+    </message>
+</context>
+<context>
+    <name>harbour-opencode</name>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="258"/>
+        <source>Auto (detect)</source>
+        <translation>Авто (визначення)</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="479"/>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="481"/>
+        <source>Server error</source>
+        <translation>Помилка сервера</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="490"/>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="500"/>
+        <source>opencode</source>
+        <translation>opencode</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="490"/>
+        <source>Agent finished</source>
+        <translation>Агент завершив роботу</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="500"/>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="589"/>
+        <source>Agent requests permission</source>
+        <translation>Агент запитує дозвіл</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="612"/>
+        <source>Allow once</source>
+        <translation>Дозволити один раз</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="623"/>
+        <source>Always allow</source>
+        <translation>Завжди дозволяти</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="634"/>
+        <source>Deny</source>
+        <translation>Заборонити</translation>
+    </message>
+</context>
+</TS>
