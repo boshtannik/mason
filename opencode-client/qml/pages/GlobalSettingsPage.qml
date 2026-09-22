@@ -186,30 +186,10 @@ Item {
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: appWindow.publishNotification(qsTr("opencode"),
-                                                         qsTr("Тестовое уведомление"))
+                                                         qsTr("Test notification"))
             }
 
-            SectionHeader { text: qsTr("Interface") }
-
-            // Языки интерфейса: только те, что полностью переведены (i18n/{lang}.json).
-            // Сейчас полностью заполнен только английский, ru-заглушка не показывается.
-            ComboBox {
-                label: qsTr("Language")
-                currentIndex: ["en"].indexOf(appWindow.uiLanguage)
-                menu: ContextMenu {
-                    MenuItem { text: qsTr("English") }
-                }
-                onCurrentIndexChanged: {
-                    if (appWindow.uiLanguage !== "en")
-                        appWindow.uiLanguage = "en"
-                }
-                Component.onCompleted: {
-                    // Если в dconf сохранился несуществующий язык (например "ru") —
-                    // сбрасываем сразу, чтобы currentIndex не остался -1.
-                    if (appWindow.uiLanguage !== "en")
-                        appWindow.uiLanguage = "en"
-                }
-            }
+            // Язык интерфейса — системный; переводы подгружаются нативно (.qm).
         }
 
         VerticalScrollDecorator {}
@@ -226,7 +206,7 @@ Item {
                 model: soundPickerPage.appWindow !== undefined
                        ? soundPickerPage.appWindow.sounds
                        : []
-                header: PageHeader { title: qsTr("Звук уведомления") }
+                header: PageHeader { title: qsTr("Notification sound") }
                 delegate: ListItem {
                     contentHeight: Theme.itemSizeSmall
                     onClicked: {

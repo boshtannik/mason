@@ -448,7 +448,7 @@ textCol.height
 
         ViewPlaceholder {
             enabled: list.count === 0
-            text: qsTr("Нет моделей для выбранного языка")
+            text: qsTr("No models for the selected language")
         }
 
         VerticalScrollDecorator {}

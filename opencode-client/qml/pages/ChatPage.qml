@@ -328,8 +328,8 @@ Item {
             anchors.right: send.left
             anchors.rightMargin: Theme.paddingSmall
             placeholderText: chatPage.busy
-                             ? qsTr("Агент работает…")
-                             : qsTr("Промпт агенту…")
+                             ? qsTr("Agent is working…")
+                             : qsTr("Agent prompt…")
             EnterKey.enabled: text.length > 0 && !chatPage.busy
             EnterKey.iconSource: "image://theme/icon-m-enter-accept"
             EnterKey.onClicked: {

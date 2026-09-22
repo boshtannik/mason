@@ -29,8 +29,6 @@ ApplicationWindow {
                                      ? soundOnPermissionSetting.value : true
     property bool sendImmediately: sendImmediatelySetting.value !== undefined
                                    ? sendImmediatelySetting.value : false
-    property string uiLanguage: uiLanguageSetting.value !== undefined
-                                ? uiLanguageSetting.value : "en"
     // Ожидающие запросы разрешений агента (`[{id,sessionID,action,resources,options}]`).
     property var pendingPermissions: []
     // Дать согласие «Разрешить один раз»: true, если запрос действительно новый
@@ -114,10 +112,6 @@ ApplicationWindow {
     ConfigurationValue {
         id: sendImmediatelySetting
         key: "/apps/harbour-opencode/sendImmediately"
-    }
-    ConfigurationValue {
-        id: uiLanguageSetting
-        key: "/apps/harbour-opencode/uiLanguage"
     }
 
     // Держим процесс живым, пока агент работает (иначе Sailfish усыпит его в фоне).
@@ -408,7 +402,6 @@ ApplicationWindow {
     onSoundOnFinishChanged: { soundOnFinishSetting.value = app.soundOnFinish; soundOnFinishSetting.sync() }
     onSoundOnPermissionChanged: { soundOnPermissionSetting.value = app.soundOnPermission; soundOnPermissionSetting.sync() }
     onSendImmediatelyChanged: { sendImmediatelySetting.value = app.sendImmediately; sendImmediatelySetting.sync() }
-    onUiLanguageChanged: { uiLanguageSetting.value = app.uiLanguage; uiLanguageSetting.sync() }
     onDingSoundChanged: { if (app.dingSound) dingSetting.value = app.dingSound; dingSetting.sync() }
 
     function playDing() {
@@ -476,9 +469,9 @@ ApplicationWindow {
     // Ошибка сервера: всегда видимое уведомление + статус.
     function publishError(msg) {
         app.statusText = "error"
-        if (msg === "") msg = qsTr("Ошибка сервера")
+        if (msg === "") msg = qsTr("Server error")
         app.playDing()
-        app.publishNotification(qsTr("Ошибка сервера"), msg)
+        app.publishNotification(qsTr("Server error"), msg)
     }
 
     function notifyAgentFinished() {
@@ -487,7 +480,7 @@ ApplicationWindow {
         if (Qt.application.state === Qt.ApplicationActive) {
             app.playDing()
         } else {
-            app.publishNotification(qsTr("opencode"), qsTr("Агент завершил работу"))
+            app.publishNotification(qsTr("opencode"), qsTr("Agent finished"))
         }
     }
 
@@ -497,7 +490,7 @@ ApplicationWindow {
         if (Qt.application.state === Qt.ApplicationActive) {
             app.playDing()
         } else {
-            app.publishNotification(qsTr("opencode"), qsTr("Агент запрашивает разрешение"))
+            app.publishNotification(qsTr("opencode"), qsTr("Agent requests permission"))
         }
     }
     function stopAgent() {
@@ -586,7 +579,7 @@ ApplicationWindow {
                     spacing: Theme.paddingMedium
 
                     Label {
-                        text: qsTr("Агент запрашивает разрешение")
+                        text: qsTr("Agent requests permission")
                         anchors.horizontalCenter: parent.horizontalCenter
                         color: Theme.primaryColor
                         font.pixelSize: Theme.fontSizeMedium
@@ -609,7 +602,7 @@ ApplicationWindow {
                     }
 
                     Button {
-                        text: qsTr("Разрешить один раз")
+                        text: qsTr("Allow once")
                         anchors.horizontalCenter: parent.horizontalCenter
                         onClicked: {
                             app.answerPermission(
@@ -620,7 +613,7 @@ ApplicationWindow {
                         }
                     }
                     Button {
-                        text: qsTr("Всегда разрешать")
+                        text: qsTr("Always allow")
                         anchors.horizontalCenter: parent.horizontalCenter
                         onClicked: {
                             app.answerPermission(
@@ -631,7 +624,7 @@ ApplicationWindow {
                         }
                     }
                     Button {
-                        text: qsTr("Запретить")
+                        text: qsTr("Deny")
                         anchors.horizontalCenter: parent.horizontalCenter
                         onClicked: {
                             app.answerPermission(

@@ -32,23 +32,23 @@ Item {
 
             menu: ContextMenu {
                 MenuItem {
-                    text: qsTr("Настройки сессии")
+                    text: qsTr("Session settings")
                     onClicked: appWindow.openSessionSettings(modelData.id)
                 }
                 MenuItem {
-                    text: qsTr("Переименовать")
+                    text: qsTr("Rename")
                     onClicked: appWindow.pageStack.push(renameDialog, {
                         sessionId: modelData.id,
                         currentTitle: modelData.title
                     })
                 }
                 MenuItem {
-                    text: qsTr("Удалить")
+                    text: qsTr("Delete")
                     onClicked: {
                         var sid = modelData.id
                         // Полоса отсчёта — на самой строке, чтобы сразу можно было
                         // удалить несколько сессий подряд (RemorsePopup блокировал экран).
-                        item.showRemorse(qsTr("Удаление сессии"), function() {
+                        item.showRemorse(qsTr("Delete session"), function() {
                             appWindow.deleteSession(sid)
                         })
                     }
@@ -60,9 +60,9 @@ Item {
 
         PullDownMenu {
             MenuItem {
-                text: qsTr("Удалить все сессии")
+                text: qsTr("Delete all sessions")
                 enabled: list.count > 0
-                onClicked: remorse.execute(qsTr("Удалить все сессии?"), function() {
+                onClicked: remorse.execute(qsTr("Delete all sessions?"), function() {
                     appWindow.deleteAllSessions()
                 })
             }
@@ -105,12 +105,12 @@ Item {
                 width: parent.width
 
                 DialogHeader {
-                    acceptText: qsTr("Переименовать")
+                    acceptText: qsTr("Rename")
                 }
                 TextField {
                     id: titleField
                     width: parent.width
-                    label: qsTr("Название сессии")
+                    label: qsTr("Session name")
                     text: dlg.currentTitle
                     inputMethodHints: Qt.ImhNoPredictiveText
                     EnterKey.enabled: text.trim().length > 0

@@ -14,7 +14,7 @@ BuildRequires:  pkgconfig(Qt5Core)
 BuildRequires:  pkgconfig(Qt5Qml)
 BuildRequires:  pkgconfig(Qt5Quick)
 BuildRequires:  pkgconfig(sailfishapp)
-BuildRequires:  desktop-file-utils
+BuildRequires:  qt5-qttools-linguist
 
 %description
 Native client for the opencode AI coding agent. Connects to the local
@@ -65,6 +65,13 @@ ls -l main
 test -x /home/mersdk/cargo-cache/piper-aarch64/piper/piper
 ls -l /home/mersdk/cargo-cache/piper-aarch64/piper
 
+# Переводы: .ts → .qm для каждого полностью переведённого языка.
+cd ../../opencode-client/translations
+for ts in *-ru.ts; do
+  lrelease -qm "${ts%.ts}.qm" "$ts"
+done
+cd ../..
+
 # - INSTALL --------------------------------------------------------------------
 %install
 MODE="${MBUILD_MODE:-debug}"
@@ -79,6 +86,9 @@ install -Dm 644 harbour-opencode.png -t %{buildroot}%{_datadir}/icons/hicolor/86
 install -Dm 644 harbour-opencode.desktop -t %{buildroot}%{_datadir}/applications
 install -d %{buildroot}%{_datadir}/%{name}
 cp -r opencode-client/qml %{buildroot}%{_datadir}/%{name}/qml
+# Переводы (.qm) для системной локали (устанавливает владельца/права install -m).
+install -d %{buildroot}%{_datadir}/%{name}/translations
+install -m 644 opencode-client/translations/*.qm -t %{buildroot}%{_datadir}/%{name}/translations
 # do-probe.sh нужен исполняемым (при копировании бит не гарантируется).
 chmod +x %{buildroot}%{_datadir}/%{name}/qml/do-probe.sh
 
@@ -103,6 +113,7 @@ fi
 %{_libexecdir}/%{name}/whisper-cli
 %{_libexecdir}/%{name}/piper
 %{_datadir}/%{name}/qml
+%{_datadir}/%{name}/translations
 %{_datadir}/%{name}/models.json
 %{_datadir}/applications/%{name}.desktop
 %{_datadir}/icons/hicolor/86x86/apps/%{name}.png

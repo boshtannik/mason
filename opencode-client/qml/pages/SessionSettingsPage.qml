@@ -21,7 +21,7 @@ Item {
     property string shareUrl: (session && session.shareUrl) ? session.shareUrl : ""
     property string modelLabel: (session && session.modelID)
                                 ? (session.providerID + " / " + session.modelID)
-                                : qsTr("нет данных")
+                                : qsTr("no data")
 
     // Защита от двойного тапа (действие выполняется ~секунду).
     property bool actionBusy: false
@@ -82,7 +82,7 @@ Item {
             id: pageHeader
             title: (session && session.title && session.title.length > 0)
                    ? session.title
-                   : qsTr("Сессия")
+                   : qsTr("Session")
         }
 
         Column {
@@ -93,7 +93,7 @@ Item {
                 right: parent.right
             }
 
-            SectionHeader { text: qsTr("Сессия") }
+            SectionHeader { text: qsTr("Session") }
 
             BackgroundItem {
                 width: parent.width
@@ -101,7 +101,7 @@ Item {
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Форк (ветка)")
+                    text: qsTr("Fork (branch)")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: sessionSettingsPage.forkSession()
@@ -114,8 +114,8 @@ Item {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
                     text: sessionSettingsPage.shareUrl.length > 0
-                          ? qsTr("Обновить ссылку")
-                          : qsTr("Поделиться")
+                          ? qsTr("Refresh link")
+                          : qsTr("Share")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: sessionSettingsPage.runAction(function() {
@@ -130,7 +130,7 @@ Item {
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Открыть ссылку")
+                    text: qsTr("Open link")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: Qt.openUrlExternally(sessionSettingsPage.shareUrl)
@@ -143,7 +143,7 @@ Item {
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Скопировать ссылку")
+                    text: qsTr("Copy link")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: Clipboard.text = sessionSettingsPage.shareUrl
@@ -165,7 +165,7 @@ Item {
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Сводка сессии")
+                    text: qsTr("Session summary")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: appWindow.pageStack.push(summaryDialog, {
@@ -185,7 +185,7 @@ Item {
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Переключить модель")
+                    text: qsTr("Switch model")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: appWindow.pageStack.push(modelPicker, {
@@ -204,12 +204,12 @@ Item {
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Компактнуть (сжать историю)")
+                    text: qsTr("Compact (compress history)")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: {
                     var sid = sessionSettingsPage.sessionId
-                    remorse.execute(qsTr("Сжать историю?"), function() {
+                    remorse.execute(qsTr("Compress history?"), function() {
                         sessionSettingsPage.runAction(function() {
                             appWindow.summarizeSession(sid)
                         })
@@ -224,19 +224,19 @@ Item {
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Прервать")
+                    text: qsTr("Abort")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
                 onClicked: appWindow.abortSession(sessionSettingsPage.sessionId)
             }
 
-            SectionHeader { text: qsTr("TODO-задачи агента") }
+            SectionHeader { text: qsTr("TODO tasks") }
 
             Label {
                 x: Theme.horizontalPageMargin
                 width: parent.width - 2 * Theme.horizontalPageMargin
                 visible: appWindow.todos.length === 0
-                text: qsTr("Задач нет")
+                text: qsTr("No tasks")
                 color: Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeSmall
             }
@@ -270,10 +270,10 @@ Item {
                 }
             }
 
-            SectionHeader { text: qsTr("Прочее") }
+            SectionHeader { text: qsTr("Misc") }
 
             TextSwitch {
-                text: qsTr("Показывать ленту инструментов")
+                text: qsTr("Show tools strip")
                 checked: appWindow.showTools
                 onCheckedChanged: appWindow.showTools = checked
             }
@@ -310,7 +310,7 @@ Item {
                     x: Theme.horizontalPageMargin
                     width: parent.width - 2 * Theme.horizontalPageMargin
                     wrapMode: Text.Wrap
-                    text: dlg.title.length > 0 ? dlg.title : qsTr("(без названия)")
+                    text: dlg.title.length > 0 ? dlg.title : qsTr("(untitled)")
                     color: Theme.primaryColor
                     font.pixelSize: Theme.fontSizeMedium
                 }
@@ -326,7 +326,7 @@ Item {
                     x: Theme.horizontalPageMargin
                     width: parent.width - 2 * Theme.horizontalPageMargin
                     wrapMode: Text.Wrap
-                    text: qsTr("Модель: ") + dlg.model
+                    text: qsTr("Model: ") + dlg.model
                     color: Theme.secondaryColor
                     font.pixelSize: Theme.fontSizeSmall
                 }
@@ -334,7 +334,7 @@ Item {
                     x: Theme.horizontalPageMargin
                     width: parent.width - 2 * Theme.horizontalPageMargin
                     wrapMode: Text.Wrap
-                    text: qsTr("Стоимость: $") + dlg.cost.toFixed(4)
+                    text: qsTr("Cost: $") + dlg.cost.toFixed(4)
                     color: Theme.secondaryColor
                     font.pixelSize: Theme.fontSizeSmall
                 }
@@ -342,7 +342,7 @@ Item {
                     x: Theme.horizontalPageMargin
                     width: parent.width - 2 * Theme.horizontalPageMargin
                     wrapMode: Text.Wrap
-                    text: qsTr("Токены: ") + dlg.tokens
+                    text: qsTr("Tokens: ") + dlg.tokens
                     color: Theme.secondaryColor
                     font.pixelSize: Theme.fontSizeSmall
                 }
@@ -351,7 +351,7 @@ Item {
                     width: parent.width - 2 * Theme.horizontalPageMargin
                     visible: dlg.share.length > 0
                     wrapMode: Text.Wrap
-                    text: qsTr("Ссылка: ") + dlg.share
+                    text: qsTr("Link: ") + dlg.share
                     color: Theme.secondaryColor
                     font.pixelSize: Theme.fontSizeExtraSmall
                 }
@@ -375,7 +375,7 @@ Item {
                 model: pickerPage.appWindow.models
 
                 header: PageHeader {
-                    title: qsTr("Модель")
+                    title: qsTr("Model")
                 }
 
                 delegate: ListItem {
@@ -421,7 +421,7 @@ Item {
 
                 ViewPlaceholder {
                     enabled: modelList.count === 0
-                    text: qsTr("Нет доступных моделей")
+                    text: qsTr("No available models")
                 }
 
                 VerticalScrollDecorator {}

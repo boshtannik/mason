@@ -171,6 +171,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // QML в главном потоке; exec() блокирует до закрытия окна.
     let mut app = QmlApp::application(APP_NAME.to_string());
+    // Нативный Qt i18n: грузим перевод (harbour-opencode-ru.qm и т.п.) по системной локали.
+    match app.install_default_translator() {
+        Ok(()) => log::info!("перевод загружен"),
+        Err(e) => log::warn!("перевод не загружен: {e}"),
+    }
     app.set_object_property("bridge".into(), bridge_pinned);
     app.set_source(QmlApp::path_to(MAIN_QML.into()));
     app.show_full_screen();
