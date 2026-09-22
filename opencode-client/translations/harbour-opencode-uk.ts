@@ -98,8 +98,13 @@ long press — remove</source>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
-        <source>Speakers</source>
-        <translation>Динаміки</translation>
+        <source>Voice answers</source>
+        <translation>Голосові відповіді</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="130"/>
+        <source>Download and select a speech synthesis model to enable\nvoice answers (Settings → Voice models).</source>
+        <translation>Завантажте та оберіть модель синтезу мови,\nщоб увімкнути голосові відповіді (Налаштування → Голосові моделі).</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="129"/>
@@ -120,6 +125,11 @@ long press — remove</source>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="134"/>
         <source>Off</source>
         <translation>Вимк</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="142"/>
+        <source>Dictation</source>
+        <translation>Диктування</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="144"/>
@@ -437,6 +447,11 @@ long press — remove</source>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="451"/>
         <source>No models for the selected language</source>
         <translation>Немає моделей для вибраної мови</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml"/>
+        <source>Update model catalogs</source>
+        <translation>Оновити каталоги моделей</translation>
     </message>
 </context>
 <context>

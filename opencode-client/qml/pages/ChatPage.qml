@@ -52,6 +52,22 @@ Item {
         VerticalScrollDecorator {}
     }
 
+    // Кнопка «стоп озвучки»: видна во время воспроизведения ответа.
+    IconButton {
+        id: ttsStopBtn
+        visible: appWindow.ttsPlaying
+        width: Theme.itemSizeMedium
+        height: Theme.itemSizeMedium
+        anchors {
+            right: parent.right
+            rightMargin: Theme.horizontalPageMargin
+            bottom: inputPanel.top
+            bottomMargin: Theme.paddingMedium
+        }
+        icon.source: "image://theme/icon-m-stop"
+        onClicked: appWindow.stopTts()
+    }
+
     Component {
         id: messageDelegate
 
@@ -79,6 +95,14 @@ Item {
                 return b.replace(/^\n+/, "")
             }
             readonly property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
+            // Ширина нижней строки: время + (для агента) кнопка озвучки + отступы.
+            readonly property real footW: {
+                var w = tsLabel.implicitWidth
+                if (!line.isUser && line.tsMs !== ""
+                        && appWindow.ttsModelReady && appWindow.ttsMode !== "off")
+                    w += Theme.iconSizeSmall + Theme.paddingMedium
+                return w
+            }
 
             Rectangle {
                 id: bubble
@@ -87,10 +111,11 @@ Item {
                        ? Theme.highlightColor
                        : Theme.rgba(Theme.primaryColor, 0.12)
                 width: Math.min(line.maxW,
-                                Math.max(textLabel.implicitWidth, tsLabel.implicitWidth)
+                                Math.max(textLabel.implicitWidth,
+                                         line.footW + 2 * Theme.paddingSmall)
                                 + 2 * Theme.paddingSmall)
                 height: textLabel.height
-                        + (tsLabel.visible ? tsLabel.height + 2 : 0)
+                        + (footRow.height > 0 ? footRow.height + Theme.paddingSmall : 0)
                         + 2 * Theme.paddingSmall
                 anchors.right: line.isUser ? parent.right : undefined
                 anchors.left: line.isUser ? undefined : parent.left
@@ -107,16 +132,37 @@ Item {
                     font.pixelSize: Theme.fontSizeSmall
                     color: Theme.primaryColor
                 }
-                Label {
-                    id: tsLabel
+                // Нижняя строка: время (+ для агента кнопка озвучки).
+                // Прижата к своему краю баббла, с отступами от краёв.
+                Row {
+                    id: footRow
                     visible: line.tsMs !== ""
-                    x: line.isUser
-                       ? Theme.paddingSmall
-                       : bubble.width - implicitWidth - Theme.paddingSmall
-                    y: textLabel.y + textLabel.height + 2
-                    text: chatPage.tsLabel(line.tsMs)
-                    font.pixelSize: Theme.fontSizeExtraSmall
-                    color: Theme.secondaryColor
+                    anchors.right: line.isUser ? undefined : bubble.right
+                    anchors.left: line.isUser ? bubble.left : undefined
+                    anchors.rightMargin: Theme.paddingSmall + 1
+                    anchors.leftMargin: Theme.paddingSmall
+                    y: textLabel.y + textLabel.height + Theme.paddingSmall
+                    spacing: Theme.paddingMedium
+
+                    // 🔊 озвучить этот баббл: только ответы агента (не-user).
+                    IconButton {
+                        id: speakBtn
+                        visible: !line.isUser
+                                 && appWindow.ttsModelReady
+                                 && appWindow.ttsMode !== "off"
+                        width: visible ? Theme.iconSizeSmall : 0
+                        height: visible ? Theme.iconSizeSmall : 0
+                        icon.source: "image://theme/icon-m-speaker-on"
+                        onClicked: appWindow.speakText(line.body)
+                    }
+
+                    Label {
+                        id: tsLabel
+                        text: chatPage.tsLabel(line.tsMs)
+                        anchors.verticalCenter: parent.verticalCenter
+                        font.pixelSize: Theme.fontSizeExtraSmall
+                        color: Theme.secondaryColor
+                    }
                 }
             }
         }

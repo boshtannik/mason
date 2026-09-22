@@ -98,8 +98,13 @@ lang drücken — entfernen</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
-        <source>Speakers</source>
-        <translation>Lautsprecher</translation>
+        <source>Voice answers</source>
+        <translation>Sprachantworten</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="130"/>
+        <source>Download and select a speech synthesis model to enable\nvoice answers (Settings → Voice models).</source>
+        <translation>Laden Sie ein Sprachsynthesemodell herunter und wählen Sie es aus,\num Sprachantworten zu aktivieren (Einstellungen → Sprachmodelle).</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="129"/>
@@ -120,6 +125,11 @@ lang drücken — entfernen</translation>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="134"/>
         <source>Off</source>
         <translation>Aus</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="142"/>
+        <source>Dictation</source>
+        <translation>Diktat</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="144"/>
@@ -437,6 +447,11 @@ lang drücken — entfernen</translation>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="451"/>
         <source>No models for the selected language</source>
         <translation>Keine Modelle für die ausgewählte Sprache</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml"/>
+        <source>Update model catalogs</source>
+        <translation>Modellkataloge aktualisieren</translation>
     </message>
 </context>
 <context>

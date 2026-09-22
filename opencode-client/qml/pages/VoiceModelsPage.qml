@@ -451,6 +451,13 @@ textCol.height
             text: qsTr("No models for the selected language")
         }
 
+        PullDownMenu {
+            MenuItem {
+                text: qsTr("Update model catalogs")
+                onClicked: appWindow.voiceCmd(appWindow.cmdCatalogUpdate, "")
+            }
+        }
+
         VerticalScrollDecorator {}
     }
 }

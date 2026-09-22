@@ -640,7 +640,8 @@ async fn run_stream(
                         | Some(Cmd::VoiceRecordStop)
                         | Some(Cmd::VoiceStt)
                         | Some(Cmd::VoiceTts)
-                        | Some(Cmd::VoiceTtsMode) => {
+                        | Some(Cmd::VoiceTtsMode)
+                        | Some(Cmd::VoiceCatalogUpdate) => {
                             voice::run_command(&voice, &cmd, &worker_pending).await;
                         }
                         None => log::warn!("неизвестная команда: {raw_cmd:?} ({raw})"),

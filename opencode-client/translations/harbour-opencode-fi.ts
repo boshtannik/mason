@@ -98,8 +98,13 @@ pitkä painallus — poista</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
-        <source>Speakers</source>
-        <translation>Kaiuttimet</translation>
+        <source>Voice answers</source>
+        <translation>Äänivastaukset</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="130"/>
+        <source>Download and select a speech synthesis model to enable\nvoice answers (Settings → Voice models).</source>
+        <translation>Lataa ja valitse puhesynteesimalli ottaksesi käyttöön\nääni vastaukset (Asetukset → Äänimallit).</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="129"/>
@@ -120,6 +125,11 @@ pitkä painallus — poista</translation>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="134"/>
         <source>Off</source>
         <translation>Pois</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="142"/>
+        <source>Dictation</source>
+        <translation>Sanelu</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="144"/>
@@ -437,6 +447,11 @@ pitkä painallus — poista</translation>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="451"/>
         <source>No models for the selected language</source>
         <translation>Ei malleja valitulle kielelle</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml"/>
+        <source>Update model catalogs</source>
+        <translation>Päivitä malliluettelot</translation>
     </message>
 </context>
 <context>

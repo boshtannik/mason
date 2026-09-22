@@ -6,10 +6,18 @@ use crate::cmd::Cmd;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const CATALOG_PATH: &str = "/usr/share/harbour-opencode/models.json";
+/// Свежий каталог моделей скачивается с официального репо dsnote (mkiol) —
+/// тот же формат и источник, из которого вырезан штатный каталог RPM.
+pub const CATALOG_URL: &str =
+    "https://raw.githubusercontent.com/mkiol/dsnote/main/config/models.json";
+/// Движки, которые поддерживает приложение (остальные из каталога отбрасываются).
+pub const SUPPORTED_ENGINES: [&str; 3] = ["stt_whisper", "tts_piper", "tts_espeak"];
+const CATALOG_USER_FILE: &str = "catalog.json";
 pub const WHISPER_BIN: &str = "/usr/libexec/harbour-opencode/whisper-cli";
 /// Статическая сборка piper (aarch64) ставится в RPM рядом с whisper-cli.
 /// Каталог содержит espeak-ng-data и свои .so (RUNPATH=$ORIGIN).
@@ -20,7 +28,14 @@ const MODELS_SUBDIR: &str = "harbour-opencode/models";
 const CONFIG_FILE: &str = "voice_state.json";
 const REC_RAW: &str = "/tmp/harbour-opencode-ptt.pcm";
 /// Временный WAV для озвучки: синтез (воркер) → файл → QML MediaPlayer.
-const TTS_OUT: &str = "/tmp/harbour-opencode-tts.wav";
+/// Имя уникальное на каждый синтез, чтобы несколько ответов подряд
+/// можно было воспроизводить последовательно (очередь в QML).
+const TTS_OUT_DIR: &str = "/tmp";
+static TTS_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn tts_out_path() -> String {
+    format!("{TTS_OUT_DIR}/harbour-opencode-tts-{:03}.wav", TTS_SEQ.fetch_add(1, Ordering::SeqCst))
+}
 
 /// Режим озвучки ответов: [Auto] — озвучивать каждый ответ, [Button] — только
 /// по кнопке 🔉 на баббле, [Off] — выключена. Единый источник строк протокола.
@@ -291,10 +306,65 @@ impl VoiceState {
 }
 
 pub fn load_catalog() -> Value {
-    std::fs::read_to_string(CATALOG_PATH)
-        .ok()
+    // Сначала обновлённый каталог из пользовательской папки (если «Обновить
+    // каталоги» уже скачивали), иначе — штатный из RPM.
+    let user = data_dir().join(CATALOG_USER_FILE);
+    let user = (user.exists()).then(|| user);
+    user.and_then(|p| std::fs::read_to_string(p).ok())
+        .or_else(|| std::fs::read_to_string(CATALOG_PATH).ok())
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| serde_json::json!({ "langs": [], "models": [] }))
+}
+
+/// Скачать свежий каталог моделей с GitHub (mkiol/dsnote) и сохранить в
+/// пользовательскую папку. Возвращает версию каталога и число моделей после
+/// фильтрации по поддерживаемым движкам.
+pub async fn update_catalog() -> Result<(u64, usize), String> {
+    let client = reqwest::Client::builder()
+        .user_agent("harbour-opencode/0.1")
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let body = client
+        .get(CATALOG_URL)
+        .send()
+        .await
+        .map_err(|e| format!("скачать каталог: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("читать каталог: {e}"))?;
+    let mut cat: Value =
+        serde_json::from_str(&body).map_err(|e| format!("не JSON каталога: {e}"))?;
+
+    // Оставляем только те модели, которые приложение умеет скачивать/использовать.
+    if let Some(models) = cat["models"].as_array_mut() {
+        models.retain(|m| {
+            m["engine"]
+                .as_str()
+                .map(|e| SUPPORTED_ENGINES.contains(&e))
+                .unwrap_or(false)
+        });
+    }
+    let count = cat["models"].as_array().map(|a| a.len()).unwrap_or(0);
+    let version: u64 = cat["version"]
+        .as_str()
+        .and_then(|s| s.trim().parse().ok())
+        .or_else(|| cat["version"].as_u64())
+        .unwrap_or(0);
+
+    let dir = data_dir();
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return Err(format!("папka данных: {e}"));
+    }
+    let (tmp, dest) = (dir.join(format!("{CATALOG_USER_FILE}.tmp")), dir.join(CATALOG_USER_FILE));
+    std::fs::write(&tmp, serde_json::to_string_pretty(&cat).unwrap_or(body.clone()))
+        .map_err(|e| format!("запись каталога: {e}"))?;
+    std::fs::rename(&tmp, &dest).map_err(|e| format!("сохранить каталог: {e}"))?;
+    log::info!(
+        "каталог моделей обновлён: с GitHub (models={count}) → {}",
+        dest.display()
+    );
+    Ok((version, count))
 }
 
 fn base_dir() -> PathBuf {
@@ -787,8 +857,9 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     if text.is_empty() {
         return;
     }
+    let out_wav = tts_out_path();
     log::info!(
-        "TTS: модель={id} piper={PIPER_BIN} текст={} байт",
+        "TTS: модель={id} piper={PIPER_BIN} текст={} байт → {out_wav}",
         text.len()
     );
 
@@ -804,7 +875,7 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         .arg("-c")
         .arg(&config)
         .arg("-f")
-        .arg(TTS_OUT)
+        .arg(&out_wav)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -836,9 +907,9 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         }
         return;
     }
-    log::info!("TTS: синтез готов, WAV в {TTS_OUT}");
+    log::info!("TTS: синтез готов, WAV в {out_wav}");
     if let Ok(mut q) = pending.lock() {
-        q.push(format!("[[tts]]{TTS_OUT}"));
+        q.push(format!("[[tts]]{out_wav}"));
     }
 }
 
@@ -1005,6 +1076,28 @@ pub async fn run_command(
                     voice.persist();
                 } else {
                     log::warn!("неизвестный режим озвучки: {mode:?}");
+                }
+            }
+        }
+        Some(Cmd::VoiceCatalogUpdate) => {
+            // Обновляем каталог моделей с GitHub; результат — строкой в чат
+            // (как и другие [голос]-уведомления воркера).
+            let pendant = pending.clone();
+            let v = voice.clone();
+            match update_catalog().await {
+                Ok((_version, count)) => {
+                    v.refresh_status();
+                    if let Ok(mut q) = pendant.lock() {
+                        q.push(format!(
+                            "[голос] каталог моделей обновлён: моделей подходит {count}"
+                        ));
+                    }
+                }
+                Err(e) => {
+                    log::error!("обновление каталога: {e}");
+                    if let Ok(mut q) = pendant.lock() {
+                        q.push(format!("[голос] каталог не обновился: {e}"));
+                    }
                 }
             }
         }

@@ -123,10 +123,32 @@ Item {
                 font.pixelSize: Theme.fontSizeExtraSmall
             }
 
-            SectionHeader { text: qsTr("Speakers") }
+            // — Диктовка: отдельная секция про отправку распознанного текста.
+            SectionHeader { text: qsTr("Dictation") }
+
+            TextSwitch {
+                text: qsTr("Send immediately")
+                checked: appWindow.sendImmediately
+                onCheckedChanged: appWindow.sendImmediately = checked
+            }
+
+            // — Автоозвучка ответов - отдельная секция. Доступна только когда
+            // скачана и выбрана модель синтеза речи; иначе — подсказка.
+            SectionHeader { text: qsTr("Voice answers") }
+
+            Label {
+                visible: !appWindow.ttsModelReady
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Download and select a speech synthesis model to enable\nvoice answers (Settings → Voice models).")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+            }
 
             ComboBox {
                 label: qsTr("Free hands / autoplay")
+                enabled: appWindow.ttsModelReady
                 currentIndex: ["auto", "button", "off"].indexOf(appWindow.ttsMode)
                 menu: ContextMenu {
                     MenuItem { text: qsTr("Auto") }
@@ -138,12 +160,6 @@ Item {
                     if (currentIndex >= 0 && currentIndex < v.length)
                         appWindow.ttsMode = v[currentIndex]
                 }
-            }
-
-            TextSwitch {
-                text: qsTr("Send immediately")
-                checked: appWindow.sendImmediately
-                onCheckedChanged: appWindow.sendImmediately = checked
             }
 
             SectionHeader { text: qsTr("Notifications") }

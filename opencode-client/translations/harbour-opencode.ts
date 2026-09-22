@@ -91,7 +91,12 @@ long press — remove</source>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
-        <source>Speakers</source>
+        <source>Voice answers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="130"/>
+        <source>Download and select a speech synthesis model to enable\nvoice answers (Settings → Voice models).</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -112,6 +117,11 @@ long press — remove</source>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="134"/>
         <source>Off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="142"/>
+        <source>Dictation</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -429,6 +439,11 @@ long press — remove</source>
     <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="451"/>
         <source>No models for the selected language</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml"/>
+        <source>Update model catalogs</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

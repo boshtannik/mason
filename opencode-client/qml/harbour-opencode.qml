@@ -22,7 +22,7 @@ ApplicationWindow {
     property string pttPosition: pttPositionSetting.value !== undefined
                                  ? pttPositionSetting.value : "left"
     property string ttsMode: ttsModeSetting.value !== undefined
-                             ? ttsModeSetting.value : "text"
+                             ? ttsModeSetting.value : "button"
     property bool soundOnFinish: soundOnFinishSetting.value !== undefined
                                  ? soundOnFinishSetting.value : true
     property bool soundOnPermission: soundOnPermissionSetting.value !== undefined
@@ -35,7 +35,7 @@ ApplicationWindow {
     // (для срабатывания звука только на появившихся).
     property var knownPermissionIds: []
     property bool sttModelReady: false
-    property bool ttsModelReady: false
+    property bool ttsModelReady: chosenTts !== ""
 
     // Для детекта перехода "агент занят → свободен".
     property bool wasBusy: false
@@ -55,6 +55,8 @@ ApplicationWindow {
     property bool recording: false
     // Идёт ли распознавание речи после остановки записи.
     property bool recognizing: false
+    // Идёт ли озвучка ответа (для отображения кнопки «стоп»).
+    property bool ttsPlaying: false
 
     // Протокольные константы голосового модуля.
     // Команды зеркалят `voice::cmd` в src/voice.rs, движки — `voice::engine`,
@@ -69,6 +71,9 @@ ApplicationWindow {
     readonly property string cmdRecordStart: "voice_record_start"
     readonly property string cmdRecordStop: "voice_record_stop"
     readonly property string cmdStt: "voice_stt"
+    readonly property string cmdTts: "voice_tts"
+    readonly property string cmdTtsMode: "voice_tts_mode"
+    readonly property string cmdCatalogUpdate: "voice_catalog_update"
     readonly property string engineStt: "stt_whisper"
     readonly property string engineTts: "tts_piper"
     readonly property string stateDownloading: "downloading"
@@ -143,6 +148,43 @@ ApplicationWindow {
         onTriggered: app.poll()
     }
 
+    // Очередь озвучки: WAV-файлы синтезируются воркером асинхронно
+    // (несколько сообщений подряд = несколько файлов). Играем строго по
+    // порядку появления: mediaplayer закончил → берём следующий из очереди.
+    property var ttsQueue: []
+    MediaPlayer {
+        id: ttsPlayer
+        onPlaybackStateChanged: {
+            if (ttsPlayer.playbackState === MediaPlayer.StoppedState)
+                app.playNextTts()
+        }
+    }
+    function playNextTts() {
+        if (app.ttsQueue.length === 0) {
+            app.ttsPlaying = false
+            return
+        }
+        var p = app.ttsQueue.shift()
+        ttsPlayer.source = "file://" + p
+        app.ttsPlaying = true
+        ttsPlayer.play()
+    }
+    function ttsEnqueue(path) {
+        if (path === "" || path === undefined)
+            return
+        app.ttsQueue = app.ttsQueue.concat(path)
+        if (!app.ttsPlaying)
+            app.playNextTts()
+    }
+    function stopTts() {
+        app.ttsQueue = []
+        app.ttsPlaying = false
+        ttsPlayer.stop()
+    }
+    function speakText(text) {
+        app.voiceCmd(app.cmdTts, text)
+    }
+
     function poll() {
         var st = bridge.status_text()
         if (st !== undefined && st !== "")
@@ -189,6 +231,15 @@ ApplicationWindow {
                                 app.dictated(text)
                             }
                         }
+                        continue
+                    }
+
+                    // Синтез озвучки готов: файл в стопку очереди, в ленту не добавляем.
+                    if (line.substring(0, 7) === "[[tts]]") {
+                        app.recognizing = false
+                        var ttsPath = line.substring(7).replace(/^\s+/, "")
+                        if (ttsPath !== "")
+                            app.ttsEnqueue(ttsPath)
                         continue
                     }
 
@@ -247,6 +298,7 @@ ApplicationWindow {
                 app.voiceModels = vo.models || []
                 app.chosenStt = vo.stt || ""
                 app.chosenTts = vo.tts || ""
+                app.ttsModelReady = app.chosenTts !== ""
                 app.voiceLang = vo.lang || "auto"
                 if (vo.langs && vo.langs.length) {
                     var opts = [{ id: "auto", name: qsTr("Auto (detect)") }]
@@ -398,11 +450,21 @@ ApplicationWindow {
     onInputModeChanged: { inputModeSetting.value = app.inputMode; inputModeSetting.sync() }
     onShowToolsChanged: { showToolsSetting.value = app.showTools; showToolsSetting.sync() }
     onPttPositionChanged: { pttPositionSetting.value = app.pttPosition; pttPositionSetting.sync() }
-    onTtsModeChanged: { ttsModeSetting.value = app.ttsMode; ttsModeSetting.sync() }
+    onTtsModeChanged: {
+        ttsModeSetting.value = app.ttsMode; ttsModeSetting.sync()
+        // Синхронизируем режим с Rust-стороной (tts_mode), иначе автоозвучка не включится.
+        app.voiceCmd(app.cmdTtsMode, app.ttsMode)
+    }
     onSoundOnFinishChanged: { soundOnFinishSetting.value = app.soundOnFinish; soundOnFinishSetting.sync() }
     onSoundOnPermissionChanged: { soundOnPermissionSetting.value = app.soundOnPermission; soundOnPermissionSetting.sync() }
     onSendImmediatelyChanged: { sendImmediatelySetting.value = app.sendImmediately; sendImmediatelySetting.sync() }
     onDingSoundChanged: { if (app.dingSound) dingSetting.value = app.dingSound; dingSetting.sync() }
+
+    // При старте синхронизируем сохранённый режим озвучки (auto/button/off)
+    // с Rust-стороной — иначе `onTtsModeChanged` не сработает для стартового значения.
+    Component.onCompleted: {
+        app.voiceCmd(app.cmdTtsMode, app.ttsMode)
+    }
 
     function playDing() {
         var slots = [ding1, ding2, ding3, ding4]
