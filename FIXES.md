@@ -61,7 +61,7 @@
   - [x] **ч.2** Лоадер на кнопке именно этого баббла: `harbour-opencode.qml` — свойства `speakingBubble`/`ttsSynth`, сброс в `playNextTts`/`stopTts`, установка в `speakText`; `ChatPage.qml` — `BusyIndicator` на `speakBtn` при `(ttsSynth || ttsPlaying) && speakingBubble === line.body`.
   - [x] **ч.3** Стоп-в-баббле вместо отдельной кнопки `ttsStopBtn` (удалена): кнопка озвучки активного баббла превращается в «стоп» (`icon-m-stop` + `highlighted`), клик = `stopTts()`. Честная отмена синтеза: `Cmd::VoiceTtsCancel` (`cmd.rs`), `cancel_tts: Arc<Mutex<bool>>` в `VoiceState`, проверка в `run_tts` (не отдаёт WAV + удаляет файл), сброс флага в `tts_from_call`; из QML `stopTts()` шлёт `voiceCmd(cmdTtsCancel)`.
   - [x] **ч.4** Исчерпывающие match'и: `main.rs` диспетчер (был без catch-all), в `voice.rs::run_command` заглушка `_ => {}` заменена на явный перечень не-голосовых `Cmd::*` (+ ветка `None`) — расширение `Cmd` теперь требует правки и диспетчера, и голосового обработчика.
-- [ ] **Этап 4. Markdown-рендер** — `mdEscape/mdInline/mdBlock` в `ChatPage.qml` + `Text.RichText` + `onLinkActivated`.
+- [x] **Этап 4. Markdown-рендер** — `mdEscape/mdInline/mdBlock` в `ChatPage.qml` + `Text.RichText` + `onLinkActivated` (коммиты `1ca5275` + `…`): заголовки h1–h3 с градацией размера (`<font size>`), жирный, курсив `*…*`/`_…_`, обычный и нумерованный списки (номер сохраняется), fenced-блоки через `<pre>` (переносы и отступы кода дословно), инлайн-код, ссылки в т.ч. с title, цитаты, `---`. Ссылки кликабельны (`Qt.openUrlExternally`). Подтверждено на телефоне пользователем.
 - [ ] **Этап 5. Контекстное меню Copy code/Copy message** — буфер через мост/`QClipboard` (НЕ глобальный `Clipboard` из Silica — белый экран), hit-область 40px+, переводы.
 
 ### Грабли (помнить!)

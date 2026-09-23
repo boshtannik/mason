@@ -31,16 +31,17 @@ Item {
 
     // Инлайновая разметка одной строки (после escape, без новострок).
     function mdInline(s) {
-        // [text](url) → ссылка; код; жирный; курсив.
-        s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" color="#82c4ff">$1</a>')
-        s = s.replace(/`([^`]+)`/g, "<font family='monospace' color='#e0e0e0'>$1</font>")
+        // [text](url "title") → ссылка; код; жирный; курсив (*…* и _…_).
+        s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g,
+                      '<a href="$2" color="#82c4ff">$1</a>')
+        s = s.replace(/`([^`]+)`/g, "<font face='monospace' color='#e0e0e0'>$1</font>")
         s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
-        s = s.replace(/(^|[\s(]|[*_])_([^_]+)_(?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
-        s = s.replace(/^(_+|\*+)([^*_]+)\1/g, "<i>$2</i>")
+        s = s.replace(/(^|[\s(])_([^_]+)_(?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
+        s = s.replace(/(^|[\s(])[*]([^*]+)[*](?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
         return s
     }
 
-    // Блоки по строкам: заголовки, списки, цитаты, разделители.
+    // Блоки по строкам: заголовки, списки, цитаты, разделители, fenced-код.
     function mdBlock(s) {
         var out = []
         var lines = s.split("\n")
@@ -51,9 +52,9 @@ Item {
             var fence = /^```([\w+-]*)\s*$/.exec(l)
             if (fence) {
                 if (inPre) {
-                    out.push("<font family='monospace'>"
-                             + preBuf.join("\n").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                             + "</font>")
+                    // Переносы внутри <pre> сохраняются дословно (Qt RichText),
+                    // пробелы/отступы кода не схлопываются, шрифт моноширинный.
+                    out.push("<pre>" + preBuf.join("\n") + "</pre>")
                     preBuf = []
                     inPre = false
                 } else {
@@ -63,19 +64,25 @@ Item {
             }
             if (inPre) { preBuf.push(l); continue }
             var h = /^(#{1,6})\s+(.*)$/.exec(l)
-            if (h) { out.push("<b>" + chatPage.mdInline(h[2]) + "</b>"); continue }
+            if (h) {
+                var sz = h[1].length === 1 ? "+3"
+                       : h[1].length === 2 ? "+2"
+                       : h[1].length === 3 ? "+1" : "+0"
+                out.push("<font size=\"" + sz + "\"><b>" + chatPage.mdInline(h[2]) + "</b></font>")
+                continue
+            }
             var ul = /^[-*]\s+(.*)$/.exec(l)
             if (ul) { out.push("\u2022 " + chatPage.mdInline(ul[1])); continue }
-            var ol = /^\s*\d+[.)]\s*(.*)$/.exec(l)
-            if (ol) { out.push("\u2022 " + chatPage.mdInline(ol[1])); continue }
+            var ol = /^\s*(\d+)[.)]\s*(.*)$/.exec(l)
+            if (ol) { out.push("<b>" + ol[1] + "</b>. " + chatPage.mdInline(ol[2])); continue }
             var qt = /^&gt;\s*(.*)$/.exec(l)
-            if (qt) { out.push("<i>" + chatPage.mdInline(qt[1]) + "</i>"); continue }
+            if (qt) { out.push("&gt; <i>" + chatPage.mdInline(qt[1]) + "</i>"); continue }
             var hr = /^\s*([-*_])\1{2,}\s*$/.exec(l)
             if (hr) { out.push("<hr/>"); continue }
             out.push(chatPage.mdInline(l))
         }
         if (inPre) {
-            out.push("<font family='monospace'>" + preBuf.join("\n").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</font>")
+            out.push("<pre>" + preBuf.join("\n") + "</pre>")
         }
         return out.join("<br/>")
     }
