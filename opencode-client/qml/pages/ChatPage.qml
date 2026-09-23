@@ -215,7 +215,7 @@ Item {
                 var w = tsLabel.implicitWidth
                 if (!line.isUser && line.tsMs !== ""
                         && appWindow.ttsModelReady && appWindow.ttsMode !== "off")
-                    w += Theme.iconSizeSmall + Theme.paddingMedium
+                    w += Theme.itemSizeMedium + Theme.paddingSmall
                 return w
             }
 
@@ -262,13 +262,15 @@ Item {
                     spacing: Theme.paddingMedium
 
                     // 🔊 озвучить этот баббл: только ответы агента (не-user).
+                    // Hit-область — полный размер иконок `iconSizeMedium`, чтобы
+                    // лёгко попадать пальцем.
                     IconButton {
                         id: speakBtn
                         visible: !line.isUser
                                  && appWindow.ttsModelReady
                                  && appWindow.ttsMode !== "off"
-                        width: visible ? Theme.iconSizeSmall : 0
-                        height: visible ? Theme.iconSizeSmall : 0
+                        width: visible ? Theme.itemSizeMedium : 0
+                        height: visible ? Theme.itemSizeMedium : 0
                         icon.source: "image://theme/icon-m-speaker-on"
                         onClicked: appWindow.speakText(line.body)
                     }
