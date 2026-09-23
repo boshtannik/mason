@@ -42,3 +42,29 @@
 
 ## Статическая проверка QML до компиляции (просьба пользователя)
 - [ ] Добавить скрипт/шаг, который проверяет QML до сборки: корректные атрибуты у компонентов Sailfish.Silica, синтаксис. Кандидаты: `qmllint` (qtdeclarative-tools) / `qmlimportscanner` / прогон через `qmlscene` в SDK-контейнере, либо простой парсер баланса скобок + проверка неизвестных свойств. Проверить наличие `qmllint` в docker-образе mersdk и подключить к сборке (жёлтые предупреждения ≠ ошибки, но бросающиеся ошибки атрибутов ловим до деплоя).
+## UX-батч чата: план и статус (для следующего ИИ, 2026-09-23)
+
+> Работа идёт ПОЭТАПНО: правка → `./mbuild.sh` (через docker) → scp RPM на телефон → `devel-su rpm -Uvh --force` → чистка `~/.cache/harbour-opencode/qmlcache` → перезапуск через `invoker` → проверка вживую → коммит. Каждый этап — отдельный коммит. Текущий HEAD: `1eb390c` (этап 3 ч.1 — hit-область кнопки озвучки), этапы 3 ч.2–3.3 задеплоены (подтверждены пользователем), коммит ожидается вместе с обновлением этого файла.
+
+### Сделано и закоммичено (этапы 1–2.5)
+- [x] **Группировка ответа ИИ** — `acc.concat` собирает стрим-строки в один «говорящий» баббл.
+- [x] **Ошибки сервера в ленту** — `human_session_error()` (`types/event.rs`), баббл + нотификация, без дублей (`continue` после `acc.concat`).
+- [x] **Детали квоты/responseBody** — `APIError` 401/402/429 показывает `responseBody` («Resets at 14:32 UTC»).
+- [x] **Непрозрачная карточка доступа** — permission-оверлей читается, не залезает за экран, затемнение фона отдельным Rectangle.
+- [x] **Мок пермишнов через воркер** — `Cmd::MockPermission` → диспетчер → отложенный снимок не стирает карточку.
+- [x] **Dev-панель** в ChatPage (`mockErrPanel`): 6 мок-ошибок + «Permission ask» + «Burst: 3 errors at once».
+- [x] **Убран debug-спам** `DBG perms snapshot` из `refresh_permissions_json`.
+
+### Осталось (переносить из stash частями — НЕ целиком!)
+- [x] **Этап 3. TTS-кнопка с лоадером** — `speakBtn` в `ChatPage.qml:266` сейчас hit-область всего `Theme.iconSizeSmall` (~мелкая). Задача: hit-область ≥ `Theme.iconSizeMedium`, а во время синтеза/озвучки на месте иконки — лоадер (BusyIndicator) конкретно у этого баббла. Статус «синтезируется/озвучивается» — из `voice_status_json` (`bridge/app.rs`, голосовой статус пишется из `voice.rs`).
+  - [x] **ч.1** hit-область `Theme.itemSizeMedium` + футер баббла шире (коммит `1eb390c`).
+  - [x] **ч.2** Лоадер на кнопке именно этого баббла: `harbour-opencode.qml` — свойства `speakingBubble`/`ttsSynth`, сброс в `playNextTts`/`stopTts`, установка в `speakText`; `ChatPage.qml` — `BusyIndicator` на `speakBtn` при `(ttsSynth || ttsPlaying) && speakingBubble === line.body`.
+  - [x] **ч.3** Стоп-в-баббле вместо отдельной кнопки `ttsStopBtn` (удалена): кнопка озвучки активного баббла превращается в «стоп» (`icon-m-stop` + `highlighted`), клик = `stopTts()`. Честная отмена синтеза: `Cmd::VoiceTtsCancel` (`cmd.rs`), `cancel_tts: Arc<Mutex<bool>>` в `VoiceState`, проверка в `run_tts` (не отдаёт WAV + удаляет файл), сброс флага в `tts_from_call`; из QML `stopTts()` шлёт `voiceCmd(cmdTtsCancel)`.
+  - [x] **ч.4** Исчерпывающие match'и: `main.rs` диспетчер (был без catch-all), в `voice.rs::run_command` заглушка `_ => {}` заменена на явный перечень не-голосовых `Cmd::*` (+ ветка `None`) — расширение `Cmd` теперь требует правки и диспетчера, и голосового обработчика.
+- [ ] **Этап 4. Markdown-рендер** — `mdEscape/mdInline/mdBlock` в `ChatPage.qml` + `Text.RichText` + `onLinkActivated`.
+- [ ] **Этап 5. Контекстное меню Copy code/Copy message** — буфер через мост/`QClipboard` (НЕ глобальный `Clipboard` из Silica — белый экран), hit-область 40px+, переводы.
+
+### Грабли (помнить!)
+- Глобальный `Clipboard` (Sailfish.Silica `Clipboard`) **недоступен** — pure-maps объявляет его в СВОЁМ платформенном слое; в нашем `pure` его нет → белый экран. Копирование — только через мост/`QClipboard`.
+- Перед перезапуском приложения на телефоне: `pkill -f "opencode serve"` (ручной serve держит SQLite-лок БД → приложение поднимает свой serve и тот умирает `exit status 1`).
+- После деплоя всегда чистить `rm -rf ~/.cache/harbour-opencode/qmlcache`, иначе QML старый.

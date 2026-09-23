@@ -33,6 +33,7 @@ pub enum Cmd {
     VoiceStt,
     VoiceTts,
     VoiceTtsMode,
+    VoiceTtsCancel,
     VoiceCatalogUpdate,
 }
 
@@ -52,6 +53,7 @@ impl Cmd {
                 | Cmd::VoiceStt
                 | Cmd::VoiceTts
                 | Cmd::VoiceTtsMode
+                | Cmd::VoiceTtsCancel
                 | Cmd::VoiceCatalogUpdate
         )
     }

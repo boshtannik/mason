@@ -57,6 +57,12 @@ ApplicationWindow {
     property bool recognizing: false
     // Идёт ли озвучка ответа (для отображения кнопки «стоп»).
     property bool ttsPlaying: false
+    // Текст баббла, который сейчас синтезируется/озвучивается (для лоадера
+    // на соответствующей кнопке озвучки). Пустая строка — ничего не озвучиваем.
+    property string speakingBubble: ""
+    // Идёт ли синтез речи: команда отправлена воркеру, WAV ещё не пришёл
+    // в очередь (это самая «тихая» фаза, когда нужна обратная связь).
+    property bool ttsSynth: false
 
     // Протокольные константы голосового модуля.
     // Команды зеркалят `voice::cmd` в src/voice.rs, движки — `voice::engine`,
@@ -73,6 +79,7 @@ ApplicationWindow {
     readonly property string cmdStt: "voice_stt"
     readonly property string cmdTts: "voice_tts"
     readonly property string cmdTtsMode: "voice_tts_mode"
+    readonly property string cmdTtsCancel: "voice_tts_cancel"
     readonly property string cmdCatalogUpdate: "voice_catalog_update"
     readonly property string engineStt: "stt_whisper"
     readonly property string engineTts: "tts_piper"
@@ -162,11 +169,13 @@ ApplicationWindow {
     function playNextTts() {
         if (app.ttsQueue.length === 0) {
             app.ttsPlaying = false
+            app.ttsSynth = false
             return
         }
         var p = app.ttsQueue.shift()
         ttsPlayer.source = "file://" + p
         app.ttsPlaying = true
+        app.ttsSynth = false
         ttsPlayer.play()
     }
     function ttsEnqueue(path) {
@@ -179,9 +188,16 @@ ApplicationWindow {
     function stopTts() {
         app.ttsQueue = []
         app.ttsPlaying = false
+        app.ttsSynth = false
+        app.speakingBubble = ""
+        // Просим воркер не отдавать WAV, если piper ещё синтезирует,
+        // иначе файл «дозреет» и озвучка снова включится.
+        app.voiceCmd(app.cmdTtsCancel, "")
         ttsPlayer.stop()
     }
     function speakText(text) {
+        app.speakingBubble = text
+        app.ttsSynth = true
         app.voiceCmd(app.cmdTts, text)
     }
 

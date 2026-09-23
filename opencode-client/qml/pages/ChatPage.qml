@@ -52,22 +52,6 @@ Item {
         VerticalScrollDecorator {}
     }
 
-    // Кнопка «стоп озвучки»: видна во время воспроизведения ответа.
-    IconButton {
-        id: ttsStopBtn
-        visible: appWindow.ttsPlaying
-        width: Theme.itemSizeMedium
-        height: Theme.itemSizeMedium
-        anchors {
-            right: parent.right
-            rightMargin: Theme.horizontalPageMargin
-            bottom: inputPanel.top
-            bottomMargin: Theme.paddingMedium
-        }
-        icon.source: "image://theme/icon-m-stop"
-        onClicked: appWindow.stopTts()
-    }
-
     // Dev-кнопка генерации мок-ошибок сервера: чтобы проверять отображение
     // ошибок в ленте без реального сервера (see bridge.mock_error).
     IconButton {
@@ -264,6 +248,10 @@ Item {
                     // 🔊 озвучить этот баббл: только ответы агента (не-user).
                     // Hit-область — полный размер иконок `iconSizeMedium`, чтобы
                     // лёгко попадать пальцем.
+                    // Когда синтезируется/озвучивается ИМЕННО ЭТОТ баббл — кнопка
+                    // превращается в «стоп» (иконка stop + лоадер во время синтеза),
+                    // чтобы прерывать озвучку прямо на самом баббле, а не отдельной
+                    // кнопкой снизу.
                     IconButton {
                         id: speakBtn
                         visible: !line.isUser
@@ -271,8 +259,25 @@ Item {
                                  && appWindow.ttsMode !== "off"
                         width: visible ? Theme.itemSizeMedium : 0
                         height: visible ? Theme.itemSizeMedium : 0
-                        icon.source: "image://theme/icon-m-speaker-on"
-                        onClicked: appWindow.speakText(line.body)
+                        property bool active: appWindow.speakingBubble === line.body
+                                              && (appWindow.ttsSynth || appWindow.ttsPlaying)
+                        icon.source: active
+                                     ? "image://theme/icon-m-stop"
+                                     : "image://theme/icon-m-speaker-on"
+                        highlighted: active
+                        // Пока синтез речи этого баббла — лоадер вместо иконки.
+                        BusyIndicator {
+                            anchors.centerIn: parent
+                            running: visible
+                            visible: appWindow.ttsSynth
+                                     && appWindow.speakingBubble === line.body
+                        }
+                        onClicked: {
+                            if (active)
+                                appWindow.stopTts()
+                            else
+                                appWindow.speakText(line.body)
+                        }
                     }
 
                     Label {

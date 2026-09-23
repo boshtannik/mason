@@ -127,6 +127,9 @@ pub struct VoiceState {
     pub tts_mode: Arc<std::sync::Mutex<TtsMode>>,
     /// Модели, качание которых надо отменить (ставит command, проверяет download_model).
     pub cancel_dl: Arc<std::sync::Mutex<HashSet<String>>>,
+    /// Отменить текущий синтез: поставить true, чтобы run_tts не пушил WAV
+    /// в очередь и удалил файл (ставит QML-стоп, проверяет run_tts).
+    pub cancel_tts: Arc<std::sync::Mutex<bool>>,
 }
 
 impl VoiceState {
@@ -907,6 +910,13 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         }
         return;
     }
+    // Синтез завершён, но пользователь мог успеть нажать «стоп» — тогда
+    // результат не отдаём в очередь и чистим файл (если успели записать).
+    if voice.cancel_tts.lock().map(|g| *g).unwrap_or(false) {
+        log::info!("TTS: синтез отменён пользователем, файл не отдаю");
+        let _ = std::fs::remove_file(&out_wav);
+        return;
+    }
     log::info!("TTS: синтез готов, WAV в {out_wav}");
     if let Ok(mut q) = pending.lock() {
         q.push(format!("[[tts]]{out_wav}"));
@@ -918,6 +928,10 @@ pub async fn tts_from_call(voice: &Arc<VoiceState>, text: &str, pending: &Arc<st
     let voice2 = voice.clone();
     let pending2 = pending.clone();
     let text = text.to_string();
+    // Новый синтез = снимаем запрос отмены от предыдущего стопа.
+    if let Ok(mut c) = voice.cancel_tts.lock() {
+        *c = false;
+    }
     tokio::spawn(async move {
         run_tts(&voice2, &text, &pending2).await;
     });
@@ -1079,6 +1093,14 @@ pub async fn run_command(
                 }
             }
         }
+        Some(Cmd::VoiceTtsCancel) => {
+            // Отменить текущий синтез/очередь озвучки: run_tts проверит флаг
+            // после завершения piper и не отдаст WAV в очередь.
+            if let Ok(mut c) = voice.cancel_tts.lock() {
+                *c = true;
+            }
+            log::info!("TTS: отмена озвучки запрошена");
+        }
         Some(Cmd::VoiceCatalogUpdate) => {
             // Обновляем каталог моделей с GitHub; результат — строкой в чат
             // (как и другие [голос]-уведомления воркера).
@@ -1101,6 +1123,26 @@ pub async fn run_command(
                 }
             }
         }
-        _ => {}
+        // Не-голосовые команды сюда не должны попадать: их обрабатывает
+        // диспетчер в main.rs. Перечисляем явно, чтобы расширение Cmd
+        // заставило компилятор следить и здесь, и в main.rs.
+        Some(Cmd::New)
+        | Some(Cmd::Open)
+        | Some(Cmd::Rename)
+        | Some(Cmd::Delete)
+        | Some(Cmd::DeleteAll)
+        | Some(Cmd::Fork)
+        | Some(Cmd::Permission)
+        | Some(Cmd::MockPermission)
+        | Some(Cmd::Share)
+        | Some(Cmd::Unshare)
+        | Some(Cmd::Summarize)
+        | Some(Cmd::Abort)
+        | Some(Cmd::SetModel) => {
+            log::warn!("voice::run_command: не-голосовая команда {action:?}");
+        }
+        None => {
+            log::warn!("voice::run_command: отсутствует действие команды");
+        }
     }
 }
