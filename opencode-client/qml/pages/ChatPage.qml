@@ -18,6 +18,68 @@ Item {
         return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m
     }
 
+    // ── Мини-markdown → HTML (Text.RichText) ──────────────────────────────
+    // Без сторонних библиотек: заголовки, списки, цитаты, жирный/курсив,
+    // инлайновый код и fenced-блоки ```. Рендер базовый, но читабельный.
+
+    function mdEscape(s) {
+        return String(s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+    }
+
+    // Инлайновая разметка одной строки (после escape, без новострок).
+    function mdInline(s) {
+        // [text](url) → ссылка; код; жирный; курсив.
+        s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" color="#82c4ff">$1</a>')
+        s = s.replace(/`([^`]+)`/g, "<font family='monospace' color='#e0e0e0'>$1</font>")
+        s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+        s = s.replace(/(^|[\s(]|[*_])_([^_]+)_(?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
+        s = s.replace(/^(_+|\*+)([^*_]+)\1/g, "<i>$2</i>")
+        return s
+    }
+
+    // Блоки по строкам: заголовки, списки, цитаты, разделители.
+    function mdBlock(s) {
+        var out = []
+        var lines = s.split("\n")
+        var inPre = false
+        var preBuf = []
+        for (var i = 0; i < lines.length; i++) {
+            var l = lines[i]
+            var fence = /^```([\w+-]*)\s*$/.exec(l)
+            if (fence) {
+                if (inPre) {
+                    out.push("<font family='monospace'>"
+                             + preBuf.join("\n").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                             + "</font>")
+                    preBuf = []
+                    inPre = false
+                } else {
+                    inPre = true
+                }
+                continue
+            }
+            if (inPre) { preBuf.push(l); continue }
+            var h = /^(#{1,6})\s+(.*)$/.exec(l)
+            if (h) { out.push("<b>" + chatPage.mdInline(h[2]) + "</b>"); continue }
+            var ul = /^[-*]\s+(.*)$/.exec(l)
+            if (ul) { out.push("\u2022 " + chatPage.mdInline(ul[1])); continue }
+            var ol = /^\s*\d+[.)]\s*(.*)$/.exec(l)
+            if (ol) { out.push("\u2022 " + chatPage.mdInline(ol[1])); continue }
+            var qt = /^&gt;\s*(.*)$/.exec(l)
+            if (qt) { out.push("<i>" + chatPage.mdInline(qt[1]) + "</i>"); continue }
+            var hr = /^\s*([-*_])\1{2,}\s*$/.exec(l)
+            if (hr) { out.push("<hr/>"); continue }
+            out.push(chatPage.mdInline(l))
+        }
+        if (inPre) {
+            out.push("<font family='monospace'>" + preBuf.join("\n").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</font>")
+        }
+        return out.join("<br/>")
+    }
+
     Connections {
         target: chatPage.appWindow
         onDictated: {
@@ -228,8 +290,10 @@ Item {
                     x: Theme.paddingSmall
                     y: Theme.paddingSmall
                     width: Math.min(line.maxW - 2 * Theme.paddingSmall, implicitWidth)
-                    text: line.body
+                    text: chatPage.mdBlock(chatPage.mdEscape(line.body))
+                    textFormat: Text.RichText
                     wrapMode: Text.Wrap
+                    onLinkActivated: Qt.openUrlExternally(link)
                     font.pixelSize: Theme.fontSizeSmall
                     color: Theme.primaryColor
                 }
