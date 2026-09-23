@@ -197,17 +197,18 @@ ApplicationWindow {
         }
         var msgs = bridge.drain_messages()
         if (msgs !== "" && msgs !== undefined) {
-            var lines = msgs.split("\n")
+            var lines = msgs.split("\u001e")
             var acc = app.messages
             for (var i = 0; i < lines.length; i++) {
                 var line = lines[i]
                 if (line !== "") {
-                    // Ошибка сервера (например "free usage exceeded") — сразу в нотификацию,
-                    // чтобы не выглядело, будто агент молча работает.
+                    // Ошибка сервера (например "free usage exceeded") — сразу в нотификацию
+                    // и в ленту, чтобы не выглядело, будто агент молча работает.
                     if (line.indexOf("[ошибка сервера]") === 0) {
                         app.recognizing = false
                         var errText = line.substring("[ошибка сервера]".length).replace(/^\s+/, "")
                         app.publishError(errText)
+                        acc = acc.concat(line)
                         continue
                     }
 
@@ -536,6 +537,16 @@ ApplicationWindow {
         app.publishNotification(qsTr("Server error"), msg)
     }
 
+    // Dev: сгенерировать мок-ошибку сервера в ленту (см. bridge.mock_error).
+    function mockServerError(kind) {
+        bridge.mock_error(kind)
+    }
+
+    // Dev: сгенерировать мок-запрос доступа агента (см. bridge.mock_permission).
+    function mockPermission() {
+        bridge.mock_permission()
+    }
+
     function notifyAgentFinished() {
         if (!app.soundOnFinish)
             return
@@ -626,74 +637,97 @@ ApplicationWindow {
             }
 
             // Оверлей запроса разрешения от агента (поверх карусели).
+            // Затемнение фона выносим в отдельный Rectangle БЕЗ opacity на
+            // контейнере: иначе прозрачными становятся текст и кнопки.
             Rectangle {
                 id: permissionOverlay
                 visible: app.permissionOverlayVisible && app.pendingPermissions.length > 0
                 anchors.fill: parent
-                color: "black"
-                opacity: 0.55
+                color: Qt.rgba(0, 0, 0, 0.65)
                 z: 20
 
-                Column {
-                    id: permissionCol
+                // Плашка с текстом запроса — почти непрозрачная, чтобы читалось.
+                Rectangle {
+                    id: permissionCard
                     anchors.centerIn: parent
                     width: parent.width - 2 * Theme.horizontalPageMargin
-                    spacing: Theme.paddingMedium
+                    color: Qt.rgba(0.05, 0.05, 0.08, 0.95)
+                    radius: Theme.paddingMedium
+                    border.color: Theme.primaryColor
+                    border.width: 1
 
-                    Label {
-                        text: qsTr("Agent requests permission")
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        color: Theme.primaryColor
-                        font.pixelSize: Theme.fontSizeMedium
-                        wrapMode: Text.Wrap
-                    }
-                    Label {
-                        text: app.pendingPermissions[0]
-                              ? (app.pendingPermissions[0].action || "")
-                                + (app.pendingPermissions[0].resources
-                                   ? (": " + app.pendingPermissions[0].resources
-                                        .map(function (r) { return r }).join(", "))
-                                   : "")
-                              : ""
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        color: Theme.secondaryHighlightColor
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.Wrap
-                        font.pixelSize: Theme.fontSizeSmall
-                    }
+                    Column {
+                        anchors {
+                            top: parent.top
+                            left: parent.left
+                            right: parent.right
+                            bottom: parent.bottom
+                            margins: Theme.paddingMedium
+                        }
+                        spacing: Theme.paddingMedium
 
-                    Button {
-                        text: qsTr("Allow once")
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        onClicked: {
-                            app.answerPermission(
-                                app.pendingPermissions[0].sessionID,
-                                app.pendingPermissions[0].id,
-                                "once")
-                            app.permissionOverlayVisible = false
+                        Label {
+                            text: qsTr("Agent requests permission")
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            color: Theme.primaryColor
+                            font.pixelSize: Theme.fontSizeLarge
+                            font.bold: true
+                            wrapMode: Text.Wrap
                         }
-                    }
-                    Button {
-                        text: qsTr("Always allow")
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        onClicked: {
-                            app.answerPermission(
-                                app.pendingPermissions[0].sessionID,
-                                app.pendingPermissions[0].id,
-                                "always")
-                            app.permissionOverlayVisible = false
+
+                        Label {
+                            text: app.pendingPermissions[0]
+                                  ? (app.pendingPermissions[0].action || "")
+                                    + (app.pendingPermissions[0].resources
+                                       ? (": " + app.pendingPermissions[0].resources
+                                            .map(function (r) { return r }).join(", "))
+                                       : "")
+                                  : ""
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            color: Theme.highlightColor
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            font.pixelSize: Theme.fontSizeMedium
                         }
-                    }
-                    Button {
-                        text: qsTr("Deny")
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        onClicked: {
-                            app.answerPermission(
-                                app.pendingPermissions[0].sessionID,
-                                app.pendingPermissions[0].id,
-                                "reject")
-                            app.permissionOverlayVisible = false
+
+                        Item {
+                            width: parent.width
+                            height: Theme.paddingLarge
+                        }
+
+                        Button {
+                            text: qsTr("Allow once")
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            onClicked: {
+                                app.answerPermission(
+                                    app.pendingPermissions[0].sessionID,
+                                    app.pendingPermissions[0].id,
+                                    "once")
+                                app.permissionOverlayVisible = false
+                            }
+                        }
+                        Button {
+                            text: qsTr("Always allow")
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            onClicked: {
+                                app.answerPermission(
+                                    app.pendingPermissions[0].sessionID,
+                                    app.pendingPermissions[0].id,
+                                    "always")
+                                app.permissionOverlayVisible = false
+                            }
+                        }
+                        Button {
+                            text: qsTr("Deny")
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            onClicked: {
+                                app.answerPermission(
+                                    app.pendingPermissions[0].sessionID,
+                                    app.pendingPermissions[0].id,
+                                    "reject")
+                                app.permissionOverlayVisible = false
+                            }
                         }
                     }
                 }

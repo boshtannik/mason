@@ -68,6 +68,117 @@ Item {
         onClicked: appWindow.stopTts()
     }
 
+    // Dev-кнопка генерации мок-ошибок сервера: чтобы проверять отображение
+    // ошибок в ленте без реального сервера (see bridge.mock_error).
+    IconButton {
+        id: mockErrBtn
+        width: Theme.itemSizeMedium
+        height: Theme.itemSizeMedium
+        anchors {
+            right: parent.right
+            rightMargin: Theme.horizontalPageMargin
+            bottom: inputPanel.top
+            bottomMargin: Theme.paddingMedium
+        }
+        icon.source: "image://theme/icon-m-clear"
+        highlighted: mockErrPanel.visible
+        onClicked: {
+            mockErrBtn.z = mockErrPanel.visible ? 0 : 10
+            mockErrPanel.visible = !mockErrPanel.visible
+        }
+    }
+
+    // Dev-панель: кнопки выбора мок-ошибки. Если не все умещаются —
+    // прокручивается внутри (SilicaFlickable + VerticalScrollDecorator).
+    Rectangle {
+        id: mockErrPanel
+        visible: false
+        z: 20
+        width: Math.min(parent.width - 2 * Theme.horizontalPageMargin,
+                        Theme.itemSizeLarge * 7)
+        height: Math.min(Theme.itemSizeMedium * 6 + Theme.paddingSmall * 5
+                         + 2 * Theme.paddingMedium,   // полная высота списка
+                         parent.height * 0.5)
+        radius: Theme.paddingMedium
+        color: Theme.rgba(Theme.overlayBackgroundColor, 0.92)
+        border.color: Theme.primaryColor
+        border.width: 1
+        anchors {
+            right: parent.right
+            rightMargin: Theme.horizontalPageMargin
+            bottom: mockErrBtn.top
+            bottomMargin: Theme.paddingSmall
+        }
+
+        SilicaFlickable {
+            id: mockErrFlick
+            anchors {
+                fill: parent
+                margins: Theme.paddingMedium
+            }
+            contentHeight: mockErrCol.height
+            VerticalScrollDecorator {}
+
+            Column {
+                id: mockErrCol
+                width: parent.width
+                spacing: Theme.paddingSmall
+
+                Button {
+                    width: parent.width
+                    text: "ProviderAuthError"
+                    onClicked: { appWindow.mockServerError("ProviderAuthError"); mockErrPanel.visible = false }
+                }
+                Button {
+                    width: parent.width
+                    text: "API Error 401"
+                    onClicked: { appWindow.mockServerError("APIError401"); mockErrPanel.visible = false }
+                }
+                Button {
+                    width: parent.width
+                    text: "API Error 429 (quota)"
+                    onClicked: { appWindow.mockServerError("APIError429"); mockErrPanel.visible = false }
+                }
+                Button {
+                    width: parent.width
+                    text: "MessageOutputLength"
+                    onClicked: { appWindow.mockServerError("MessageOutputLengthError"); mockErrPanel.visible = false }
+                }
+                Button {
+                    width: parent.width
+                    text: "MessageAborted"
+                    onClicked: { appWindow.mockServerError("MessageAbortedError"); mockErrPanel.visible = false }
+                }
+                Button {
+                    width: parent.width
+                    text: "UnknownError"
+                    onClicked: { appWindow.mockServerError("UnknownError"); mockErrPanel.visible = false }
+                }
+                // Разделитель перед «нестандартными» событиями.
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: Theme.rgba(Theme.primaryColor, 0.25)
+                }
+                Button {
+                    width: parent.width
+                    text: "Permission ask (bash)"
+                    onClicked: { appWindow.mockPermission(); mockErrPanel.visible = false }
+                }
+                Button {
+                    width: parent.width
+                    text: "Burst: 3 errors at once"
+                    onClicked: {
+                        appWindow.mockServerError("ProviderAuthError")
+                        appWindow.mockServerError("APIError429")
+                        appWindow.mockServerError("UnknownError")
+                        mockErrPanel.visible = false
+                    }
+                }
+            }
+        }
+    }
+
     Component {
         id: messageDelegate
 
@@ -88,10 +199,14 @@ Item {
                 var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
                 return b.substring(0, 4) === ">>> "
             }
+            // Ошибка сервера (лимит, доступ к ИИ и т.п.) — отображается красноватым.
+            property bool isError: line.raw.indexOf("[ошибка сервера]") === 0
             property string body: {
                 var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
                 if (b.substring(0, 4) === ">>> ")
                     b = b.substring(4)
+                if (line.isError)
+                    b = b.replace(/^\[ошибка сервера\]\s*/, "")
                 return b.replace(/^\n+/, "")
             }
             readonly property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
@@ -109,7 +224,9 @@ Item {
                 radius: Theme.paddingMedium
                 color: line.isUser
                        ? Theme.highlightColor
-                       : Theme.rgba(Theme.primaryColor, 0.12)
+                       : (line.isError
+                          ? Qt.rgba(0.85, 0.15, 0.15, 0.18)
+                          : Theme.rgba(Theme.primaryColor, 0.12))
                 width: Math.min(line.maxW,
                                 Math.max(textLabel.implicitWidth,
                                          line.footW + 2 * Theme.paddingSmall)

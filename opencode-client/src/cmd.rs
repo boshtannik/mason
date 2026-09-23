@@ -16,6 +16,7 @@ pub enum Cmd {
     DeleteAll,
     Fork,
     Permission,
+    MockPermission,
     Share,
     Unshare,
     Summarize,

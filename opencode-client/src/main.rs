@@ -297,24 +297,15 @@ async fn run_stream(
                 match item {
                     Some(Ok(ev)) => {
                         if let opencode_client::types::event::Event::SessionError { properties } = &ev.payload {
-                            // Ошибка приходит как структурированный JSON; в чат/нотификацию
-                            // отдаём только человекочитаемое сообщение, а не сырой объект.
-                            let msg = properties
-                                .error
-                                .as_ref()
-                                .and_then(|e| {
-                                    e.pointer("/data/message")
-                                        .or_else(|| e.pointer("/message"))
-                                        .and_then(|m| m.as_str())
-                                })
-                                .map(|m| m.to_string())
-                                .unwrap_or_else(|| {
-                                    properties
-                                        .error
-                                        .as_ref()
-                                        .map(|e| e.to_string())
-                                        .unwrap_or_default()
-                                });
+                            // Классифицируем по типу ошибки (см. human_session_error):
+                            // авторизация провайдера, ошибка API/квот, лимит длины
+                            // вывода, прерывание, неизвестное. Пустое сообщение —
+                            // событие без error (например пустой sessionID) — пропускаем.
+                            let msg = opencode_client::types::event::human_session_error(properties.error.as_ref());
+                            if msg.is_empty() {
+                                log::debug!("session.error без error-поля, пропускаю");
+                                continue;
+                            }
                             log::error!("session.error: {msg}");
                             if let Ok(mut q) = worker_pending.lock() {
                                 q.push(format!("[ошибка сервера] {msg}"));
@@ -444,10 +435,35 @@ async fn run_stream(
                                 Err(e) => log::error!("fork_session: {e}"),
                             }
                         }
+                        Some(Cmd::MockPermission) => {
+                            let mut st = dispatcher.lock().await;
+                            st.permissions.push(opencode_client::types::Permission {
+                                id: format!("mock-perm-{}", std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis()).unwrap_or(0)),
+                                sessionID: "mock-session".to_string(),
+                                action: "bash".to_string(),
+                                resources: vec!["npm install && npm run build".to_string()],
+                                save: None,
+                                metadata: None,
+                                source: None,
+                            });
+                            drop(st);
+                            refresh_permissions_json(&dispatcher, &permissions).await;
+                        }
                         Some(Cmd::Permission) => {
                             let session_id = cmd["session"].as_str().unwrap_or("");
                             let pid = cmd["id"].as_str().unwrap_or("");
                             if session_id.is_empty() || pid.is_empty() {
+                                continue;
+                            }
+                            // Мок-пермишн не существует на сервере — просто снимаем из очереди.
+                            if session_id == "mock-session" {
+                                let mut st = dispatcher.lock().await;
+                                st.permissions.pop(pid);
+                                drop(st);
+                                refresh_permissions_json(&dispatcher, &permissions).await;
+                                log::info!("permission mock {pid} снят с очереди");
                                 continue;
                             }
                             let kind = match cmd["response"].as_str() {
@@ -1116,9 +1132,6 @@ async fn refresh_permissions_json(
         .collect();
     drop(st);
     let pj = serde_json::Value::Array(arr).to_string();
-    if pj.len() > 2 {
-        log::info!("DBG perms snapshot: {pj}");
-    }
     if let Ok(mut g) = permissions.lock() {
         *g = pj;
     }

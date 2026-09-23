@@ -60,11 +60,15 @@ pub struct AppBridge {
     permissions_shared: Arc<Mutex<String>>,
 
     /// QML: забрать и очистить накопленные сообщения (polling).
+    /// Элементы разделяем контрольным символом Record Separator (`\x1e`), а не
+    /// `\n`: тексты ответов ИИ могут содержать переносы строк, которые при
+    /// `join("/`split`("\n")` рвали бы сообщение на куски в ленте.
     drain_messages: qt_method!(fn drain_messages(&self) -> QString {
+        const RS: char = '\u{1e}';
         let out = self
             .pending_messages
             .lock()
-            .map(|mut q| std::mem::take(&mut *q).join("\n"))
+            .map(|mut q| std::mem::take(&mut *q).join(&RS.to_string()))
             .unwrap_or_default();
         QString::from(out)
     }),
@@ -246,6 +250,60 @@ pub struct AppBridge {
                 "cmd": Cmd::Permission, "session": session, "id": id, "response": response
             }));
         }
+    }),
+    /// QML (dev): сгенерировать мок-ошибку сервера в ленту, как будто пришёл
+    /// `session.error` с соответствующим типом. Полезно для отладки GUI без
+    /// реального сервера. Строки кладём через ту же `human_session_error`,
+    /// что и реальные события, — формат бабблов гарантированно совпадает.
+    mock_error: qt_method!(fn mock_error(&self, kind: QString) {
+        let kind = kind.to_string();
+        let payload = match kind.as_str() {
+            "ProviderAuthError" => serde_json::json!({
+                "name": "ProviderAuthError",
+                "data": { "providerID": "anthropic", "message": "No API key found" }
+            }),
+            "APIError401" => serde_json::json!({
+                "name": "APIError",
+                "data": { "message": "Unauthorized", "statusCode": 401, "isRetryable": false }
+            }),
+            "APIError429" => serde_json::json!({
+                "name": "APIError",
+                "data": {
+                    "message": "Rate limit exceeded",
+                    "statusCode": 429,
+                    "isRetryable": true,
+                    "responseBody": "Free usage exceeded. Resets at 14:32 UTC"
+                }
+            }),
+            "MessageOutputLengthError" => serde_json::json!({
+                "name": "MessageOutputLengthError",
+                "data": {}
+            }),
+            "MessageAbortedError" => serde_json::json!({
+                "name": "MessageAbortedError",
+                "data": { "message": "Response aborted by user" }
+            }),
+            "UnknownError" => serde_json::json!({
+                "name": "UnknownError",
+                "data": { "message": "Unexpected upstream failure" }
+            }),
+            other => {
+                log::warn!("QML mock_error: неизвестный тип {other:?}");
+                return;
+            }
+        };
+        let msg = crate::types::event::human_session_error(Some(&payload));
+        log::info!("QML mock_error {kind:?} -> {msg:?}");
+        if let Ok(mut q) = self.pending_messages.lock() {
+            q.push(format!("[ошибка сервера] {msg}"));
+        }
+    }),
+    /// QML (dev): сгенерировать мок-запрос доступа, как будто агент запросил
+    /// разрешение. Идёт через воркер (Cmd::MockPermission), чтобы пермишн
+    /// попал в очередь диспетчера и не был затёрт периодическим снимком.
+    mock_permission: qt_method!(fn mock_permission(&self) {
+        log::info!("QML mock_permission");
+        self.push_command(serde_json::json!({ "cmd": Cmd::MockPermission }));
     }),
 }
 

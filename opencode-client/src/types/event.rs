@@ -764,6 +764,101 @@ pub struct SessionErrorProperties {
     pub error: Option<serde_json::Value>,
 }
 
+/// Превращает серверную ошибку (`properties.error`) в человекочитаемое
+/// сообщение для ленты чата. Типы ошибок — дискриминируемый union
+/// `{name, data}` из OpenAPI-спеки сервера (`/doc`), см. типы SDK.
+/// Если `error` отсутствует — пустая строка (игнорируем событие).
+pub fn human_session_error(error: Option<&serde_json::Value>) -> String {
+    let Some(e) = error else { return String::new() };
+    let name = e.pointer("/name").and_then(|v| v.as_str()).unwrap_or("");
+    let data_message = e
+        .pointer("/data/message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let status_code = e
+        .pointer("/data/statusCode")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_default();
+
+    match name {
+        "ProviderAuthError" => {
+            let provider = e
+                .pointer("/data/providerID")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if data_message.is_empty() {
+                format!("Провайдер {provider} не авторизован: добавьте ключ API")
+            } else {
+                format!("Провайдер {provider} не авторизован: {data_message}")
+            }
+        }
+        "APIError" => {
+            let is_retryable = e
+                .pointer("/data/isRetryable")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            // 401/402/429 — квоты/доступ; остальное — сторонний инцидент.
+            let tag = match status_code {
+                401 | 402 | 429 => "ошибка доступа".to_string(),
+                _ if !data_message.is_empty() => "ошибка провайдера".to_string(),
+                _ => String::new(),
+            };
+            let mut s = String::new();
+            if !tag.is_empty() {
+                s = format!("[{tag}] ");
+            }
+            if status_code != 0 {
+                s.push_str(&format!("код {status_code}; "));
+            }
+            if data_message.is_empty() {
+                s.push_str("сервер ИИ не ответил (сторонняя ошибка)");
+            } else {
+                s.push_str(&data_message);
+            }
+            // Детали обычно в `responseBody` (напр. «ограничение снимется в 14:32»).
+            if let Some(body) = e.pointer("/data/responseBody").and_then(|v| v.as_str()) {
+                let body = body.trim();
+                if !body.is_empty() && !body.contains(data_message.trim()) {
+                    s.push_str(". ");
+                    s.push_str(body);
+                }
+            }
+            if is_retryable {
+                s.push_str(" (можно повторить)");
+            }
+            s
+        }
+        "MessageOutputLengthError" => {
+            "Ответ превысил допустимую длину вывода модели".to_string()
+        }
+        "MessageAbortedError" => {
+            if data_message.is_empty() {
+                "Ответ прерван".to_string()
+            } else {
+                format!("Ответ прерван: {data_message}")
+            }
+        }
+        "UnknownError" => {
+            if data_message.is_empty() {
+                "Неизвестная ошибка сервера".to_string()
+            } else {
+                data_message
+            }
+        }
+        _ => {
+            // Незнакомый тип — отдаём сырой объект (для отладки новых полей).
+            if let Some(e) = e.as_object() {
+                serde_json::to_string(e).unwrap_or_else(|_| "ошибка сервера".into())
+            } else if !name.is_empty() {
+                format!("{name}: {data_message}")
+            } else {
+                "ошибка сервера".to_string()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct InstallationUpdatedProperties {
     pub version: String,
