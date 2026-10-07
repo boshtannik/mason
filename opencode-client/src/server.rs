@@ -54,6 +54,17 @@ impl ServerGuard {
         info!("PATH={:?}, opencode bin={:?}", std::env::var("PATH"), bin);
 
         let mut cmd = Command::new(&bin);
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".into());
+        cmd.current_dir(&home)
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", format!("{home}/.config"))
+            .env("XDG_DATA_HOME", format!("{home}/.local/share"))
+            .env("XDG_CACHE_HOME", format!("{home}/.cache"))
+            .env("XDG_STATE_HOME", format!("{home}/.local/state"))
+            .env(
+                "PATH",
+                std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".into()),
+            );
         cmd.arg("serve")
             .arg("--port")
             .arg(cfg.port.to_string())
@@ -127,7 +138,7 @@ impl ServerGuard {
         // Ждём health.
         let client = OpenCodeClient::new(base.clone(), auth.clone());
         let mut ready = false;
-        for _ in 0..50 {
+        for _ in 0..100 {
             if client.health().await.unwrap_or(false) {
                 ready = true;
                 break;
