@@ -10,6 +10,43 @@ and approve tool calls, stream assistant output, and use local voice input/outpu
 
 Built and tested on a Sony Xperia 10 IV running Sailfish OS 5.1.0.11 (aarch64).
 
+## How it works
+
+`mason` runs the opencode agent **entirely in your pocket**. The thinking happens in
+the cloud; the work happens on the device:
+
+```
+          cloud LLM API (Anthropic / OpenAI / …)
+                    ▲   HTTPS + API key
+                    │
+        ┌───────────┴────────────┐
+        │  opencode server        │  ← bundled arm64 binary,
+        │  (runs on the phone)    │    started by the client via
+        │  sessions · planning    │    `opencode serve` on 127.0.0.1:4096
+        └───────────┬────────────┘
+             ▲      │  executes tools
+   HTTP + SSE│      ▼
+        ┌───┴────────────────┐        ┌───────────────────────────┐
+        │  harbour-opencode   │        │  phone filesystem, shell,  │
+        │  Rust backend + QML │  ───►  │  git — all executed        │
+        │  app (the UI)       │approve │  on the device             │
+        └─────────────────────┘        └───────────────────────────┘
+```
+
+- **Orchestration & execution are local.** The opencode server, its sessions and
+  every tool call (files, shell, git) run on the phone, against the phone's own
+  filesystem.
+- **The model is remote.** The server reaches the configured LLM provider over
+  HTTPS with an API key; without network the agent cannot reason.
+- **Nothing runs silently.** Every tool call is surfaced as a permission request in
+  the UI, so the user stays the approver of what actually executes on the device.
+
+A secondary, future mode is using the same client as a thin console for an
+`opencode serve` instance running on a PC (point `OPENCODE_SERVER_URL` at it).
+
+> **API key:** the LLM credentials live on the phone (not in this repo). Do not
+> commit them, and treat scripts/config that carry them as secrets.
+
 ## Features
 
 - Full opencode session flow over HTTP + SSE (`/session`, `POST /session`,
