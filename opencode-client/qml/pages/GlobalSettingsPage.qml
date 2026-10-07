@@ -162,6 +162,40 @@ Item {
                 }
             }
 
+            SectionHeader { text: qsTr("General") }
+
+            TextField {
+                id: workdirField
+                width: parent.width
+                text: (typeof appWindow.workdir !== "undefined") ? appWindow.workdir : ""
+                placeholderText: qsTr("e.g. /home/defaultuser/mason")
+                label: qsTr("Working directory (restart required)")
+                onActiveFocusChanged: {
+                    if (!activeFocus && typeof appWindow.bridge !== "undefined" && typeof appWindow.workdir !== "undefined") {
+                        appWindow.workdir = text
+                        appWindow.bridge.set_workdir(text)
+                    }
+                }
+                EnterKey.enabled: text.length > 0
+                EnterKey.iconSource: "image://theme/icon-m-enter-accept"
+                EnterKey.onClicked: {
+                    if (typeof appWindow.bridge !== "undefined" && typeof appWindow.workdir !== "undefined") {
+                        appWindow.workdir = text
+                        appWindow.bridge.set_workdir(text)
+                    }
+                    focus = false
+                }
+            }
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Changes take effect after restarting the app")
+                color: Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+                wrapMode: Text.Wrap
+            }
+
             SectionHeader { text: qsTr("Notifications") }
 
             TextSwitch {
