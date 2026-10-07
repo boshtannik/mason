@@ -38,6 +38,8 @@ ApplicationWindow {
     // (для срабатывания звука только на появившихся).
     property var knownPermissionIds: []
     property bool sttModelReady: false
+    // Рабочая директория opencode (настройка). Загружается из bridge.settings_json().
+    property string workdir: ""
     property bool ttsModelReady: chosenTts !== ""
 
     // Для детекта перехода "агент занят → свободен".
@@ -348,6 +350,16 @@ ApplicationWindow {
                 }
             } catch (e) {
                 console.log("permissions parse error: " + e)
+            }
+        }
+        var sj = bridge.settings_json()
+        if (sj !== "" && sj !== undefined) {
+            try {
+                var sjson = JSON.parse(sj)
+                if (sjson.workdir !== undefined && sjson.workdir !== "")
+                    app.workdir = sjson.workdir
+            } catch (e) {
+                console.log("settings parse error: " + e)
             }
         }
     }
