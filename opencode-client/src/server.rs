@@ -1,4 +1,5 @@
 use std::io::BufRead;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::Mutex as StdMutex;
@@ -24,6 +25,8 @@ pub struct ServerConfig {
     pub bin: Option<std::path::PathBuf>,
     /// Доп. аргументы (--pure для работы без плагинов).
     pub args: Vec<String>,
+    /// Рабочая директория для opencode serve (cwd). По умолчанию $HOME/mason
+    pub cwd: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -32,6 +35,7 @@ impl Default for ServerConfig {
             port: 0,
             bin: None,
             args: vec!["--pure".to_string()],
+            cwd: None,
         }
     }
 }
@@ -55,7 +59,12 @@ impl ServerGuard {
 
         let mut cmd = Command::new(&bin);
         let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".into());
-        cmd.current_dir(&home)
+        let cwd = cfg
+            .cwd
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(&home).join("mason"));
+        let _ = std::fs::create_dir_all(&cwd);
+        cmd.current_dir(&cwd)
             .env("HOME", &home)
             .env("XDG_CONFIG_HOME", format!("{home}/.config"))
             .env("XDG_DATA_HOME", format!("{home}/.local/share"))
