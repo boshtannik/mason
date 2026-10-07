@@ -16,6 +16,15 @@ pub enum Cmd {
     DeleteAll,
     Fork,
     Permission,
+    /// Установить рабочую директорию для opencode serve (cwd).
+    #[serde(rename = "set_workdir")]
+    SetWorkdir,
+    /// Запросить текущие настройки (воркер обновит shared).
+    #[serde(rename = "get_settings")]
+    GetSettings,
+    /// Сохранить настройки (рабочая директория и т.п.)
+    #[serde(rename = "save_settings")]
+    SaveSettings,
     /// Dev-only (см. `bridge/mock_permission`): в релиз-сборке варианта нет.
     #[cfg(debug_assertions)]
     MockPermission,
