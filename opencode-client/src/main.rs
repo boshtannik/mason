@@ -241,6 +241,7 @@ async fn run_worker(
                 voice.clone(),
                 tools.clone(),
                 permissions.clone(),
+                settings.clone(),
             ) => {
                 match r {
                     Ok(()) => log::warn!("SSE поток завершился, переподключаюсь…"),
@@ -272,6 +273,7 @@ async fn run_stream(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
+    _settings: Arc<std::sync::Mutex<String>>,
 ) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
 
