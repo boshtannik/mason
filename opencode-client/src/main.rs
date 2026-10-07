@@ -82,6 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let voice = voice::VoiceState::with_status(bridge_pinned.borrow().voice_status_handle());
     let tools = bridge_pinned.borrow().tools_handle();
     let permissions = bridge_pinned.borrow().permissions_handle();
+    let settings = bridge_pinned.borrow().settings_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
@@ -108,11 +109,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_voice = voice.clone();
     let worker_tools = tools.clone();
     let worker_permissions = permissions.clone();
+    let worker_settings = settings.clone();
     let worker_url_tx = url_tx.clone();
     let worker_dispatcher = dispatcher.clone();
     let worker_base = env_base.clone();
     let worker_auth = env_auth.clone();
     let worker_stop_rx = stop_rx;
+    let worker_settings = settings.clone();
     let worker = std::thread::Builder::new()
         .name("opencode-worker".into())
         .spawn(move || {
@@ -121,6 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .build()
                 .expect("tokio runtime");
             rt.block_on(async move {
+                // TODO: прочитать настройки из DConf/файла и передать cwd
                 let guard = server::ServerGuard::start(server::ServerConfig::default()).await;
                 let base = match &guard {
                     Ok(g) => {
@@ -150,11 +154,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_models,
                             worker_sounds,
                             worker_voice,
-                            worker_tools,
-                            worker_permissions,
-                            worker_stop_rx,
-                        )
-                        .await
+                        worker_tools,
+                        worker_permissions,
+                        worker_settings,
+                        worker_stop_rx,
+                    )
+                    .await
                     }
                     None => set_status(&worker_status, "error"),
                 }
@@ -210,6 +215,7 @@ async fn run_worker(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
+    settings: Arc<std::sync::Mutex<String>>,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     loop {

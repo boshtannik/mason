@@ -428,6 +428,11 @@ impl AppBridge {
         self.permissions_shared.clone()
     }
 
+    /// Хэндл настроек для воркера.
+    pub fn settings_handle(&self) -> Arc<Mutex<String>> {
+        self.settings_shared.clone()
+    }
+
     /// Положить JSON-команду в очередь для воркера.
     fn push_command(&self, v: serde_json::Value) {
         if let Ok(mut q) = self.commands_shared.lock() {
