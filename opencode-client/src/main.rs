@@ -673,6 +673,37 @@ async fn run_stream(
                         | Some(Cmd::VoiceCatalogUpdate) => {
                             voice::run_command(&voice, &cmd, &worker_pending).await;
                         }
+
+                        Some(Cmd::GetSettings) => {
+                            let mut st = load_settings();
+                            if st.get("workdir").is_none() {
+                                st["workdir"] = serde_json::json!(default_workdir().to_string_lossy());
+                                save_settings_file(&st);
+                            }
+                            if let Ok(mut g) = settings.lock() {
+                                *g = st.to_string();
+                            }
+                        }
+                        Some(Cmd::SaveSettings) => {
+                            if let Some(v) = cmd.get("value") {
+                                if let Ok(sv) = serde_json::from_value::<serde_json::Value>(v.clone()) {
+                                    save_settings_file(&sv);
+                                    if let Ok(mut g) = settings.lock() {
+                                        *g = sv.to_string();
+                                    }
+                                }
+                            }
+                        }
+                        Some(Cmd::SetWorkdir) => {
+                            if let Some(val) = cmd.get("value").and_then(|x| x.as_str()) {
+                                let mut st = load_settings();
+                                st["workdir"] = serde_json::json!(val);
+                                save_settings_file(&st);
+                                if let Ok(mut g) = settings.lock() {
+                                    *g = st.to_string();
+                                }
+                            }
+                        }
                         None => log::warn!("неизвестная команда: {raw_cmd:?} ({raw})"),
                     }
                 }
@@ -1149,3 +1180,29 @@ async fn refresh_permissions_json(
         *g = pj;
     }
 }
+fn settings_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".into());
+    std::path::PathBuf::from(home).join(".config/harbour-opencode").join("settings.json")
+}
+
+fn load_settings() -> serde_json::Value {
+    let p = settings_path();
+    match std::fs::read_to_string(&p) {
+        Ok(txt) => serde_json::from_str(&txt).unwrap_or_default(),
+        Err(_) => serde_json::json!({}),
+    }
+}
+
+fn save_settings_file(v: &serde_json::Value) {
+    let p = settings_path();
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(p, v.to_string());
+}
+
+fn default_workdir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".into());
+    std::path::PathBuf::from(home).join("mason")
+}
+
