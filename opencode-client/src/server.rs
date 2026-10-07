@@ -310,7 +310,8 @@ fn reap_orphans() {
     write_registry(&alive);
 }
 
-/// Ищет бинарь opencode: явный путь → OPENCODE_BIN → стандартные места → PATH.
+/// Ищет бинарь opencode. Приоритет: явный путь → OPENCODE_BIN → bundled в RPM
+/// (наш, изолированный) → привычные системные места → PATH.
 fn resolve_bin(explicit: Option<std::path::PathBuf>) -> std::path::PathBuf {
     if let Some(b) = explicit {
         return b;
@@ -319,6 +320,7 @@ fn resolve_bin(explicit: Option<std::path::PathBuf>) -> std::path::PathBuf {
         return p.into();
     }
     for cand in [
+        "/usr/libexec/harbour-opencode/opencode",
         "/usr/local/bin/opencode",
         "/usr/bin/opencode",
         "/opt/opencode/bin/opencode",

@@ -16,6 +16,8 @@ pub enum Cmd {
     DeleteAll,
     Fork,
     Permission,
+    /// Dev-only (см. `bridge/mock_permission`): в релиз-сборке варианта нет.
+    #[cfg(debug_assertions)]
     MockPermission,
     Share,
     Unshare,

@@ -435,6 +435,7 @@ async fn run_stream(
                                 Err(e) => log::error!("fork_session: {e}"),
                             }
                         }
+                        #[cfg(debug_assertions)]
                         Some(Cmd::MockPermission) => {
                             let mut st = dispatcher.lock().await;
                             st.permissions.push(opencode_client::types::Permission {
@@ -458,6 +459,9 @@ async fn run_stream(
                                 continue;
                             }
                             // Мок-пермишн не существует на сервере — просто снимаем из очереди.
+                            // (Ветка доступна только в debug-сборке: нет смысла искать
+                            // mock-session в релизе, где моков и так нет.)
+                            #[cfg(debug_assertions)]
                             if session_id == "mock-session" {
                                 let mut st = dispatcher.lock().await;
                                 st.permissions.pop(pid);

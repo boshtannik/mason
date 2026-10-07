@@ -83,6 +83,36 @@ docker run --rm \
   fi
   find "$HOME/cargo-cache/piper-aarch64" -maxdepth 2 -name piper -type f
   ls -l "$HOME/cargo-cache/piper-aarch64/piper"
+  # opencode CLI: бандлим arm64-бинарь в RPM (/usr/libexec/harbour-opencode/opencode),
+  # чтобы клиент не зависел от отдельно установленного opencode и не конфликтовал
+  # с ним по PATH. Версия 1.18.30 — единственная, реально держащая `opencode serve`
+  # на arm64 (проверена на телефоне). 1.18.31/1.18.32 arm64 — Bun-сборки: `--version`
+  # без аргументов выводит 1.3.14 (Bun), а `serve` падает с "Script not found serve".
+  # НЕ «улучшать» до новее, пока в релизах не вернут нативный arm64 бинарь.
+  OC_VERSION="1.18.30"
+  # SHA-256 эталонного бинаря 1.18.30 (linux-arm64, проверен на телефоне).
+  # Сверяем не только версию, но и сам файл: защита от подмены кэша
+  # (например, Bun-бинарём с уже подходящим opencode.version), из-за которой
+  # в RPM мог уехать не тот открытод.
+  OC_SHA256="01edb5839aa10d5b09133fedcb335a062ecad6e82552933bb14f71756f2b296b"
+  OC_CLI="$HOME/cargo-cache/opencode-cli"
+  OC_SHA_HAVE=$(sha256sum "$OC_CLI/opencode" 2>/dev/null)
+  OC_SHA_HAVE=${OC_SHA_HAVE%% *}
+  if [ ! -e "$OC_CLI/opencode" ] \
+     || [ "$(cat "$OC_CLI/opencode.version" 2>/dev/null)" != "$OC_VERSION" ] \
+     || [ "$OC_SHA_HAVE" != "$OC_SHA256" ]; then
+    curl -fsSL -o /tmp/opencode-linux-arm64.tar.gz \
+      "https://github.com/anomalyco/opencode/releases/download/v${OC_VERSION}/opencode-linux-arm64.tar.gz"
+    rm -rf "$OC_CLI"
+    mkdir -p "$OC_CLI"
+    tar -xzf /tmp/opencode-linux-arm64.tar.gz -C "$OC_CLI"
+    printf '%s\n' "$OC_VERSION" > "$OC_CLI/opencode.version"
+  fi
+  echo "opencode CLI version: $(cat "$OC_CLI/opencode.version")"
+  OC_SHA_NOW=$(sha256sum "$OC_CLI/opencode")
+  echo "opencode CLI sha256: ${OC_SHA_NOW%% *}"
+  find "$OC_CLI" -maxdepth 1 -name opencode -type f
+  ls -l "$OC_CLI/opencode"
   mb2 -n -t SailfishOS-5.1.0.11-aarch64 --no-snapshot=force build
   echo "=== RPM ($MBUILD_MODE) ==="
   ls -l RPMS/*.rpm

@@ -19,6 +19,9 @@ ApplicationWindow {
     property string currentSessionId: ""
     property bool showTools: showToolsSetting.value !== undefined
                             ? showToolsSetting.value : true
+    // True только в debug-сборке: включает кнопки моков (ошибки/пермишны).
+    readonly property bool devTools: bridge !== undefined
+                                     && bridge.dev_tools()
     property string pttPosition: pttPositionSetting.value !== undefined
                                  ? pttPositionSetting.value : "left"
     property string ttsMode: ttsModeSetting.value !== undefined
@@ -553,14 +556,16 @@ ApplicationWindow {
         app.publishNotification(qsTr("Server error"), msg)
     }
 
-    // Dev: сгенерировать мок-ошибку сервера в ленту (см. bridge.mock_error).
+    // Dev (только debug-сборка): сгенерировать мок-ошибку сервера в ленту.
     function mockServerError(kind) {
-        bridge.mock_error(kind)
+        if (app.devTools)
+            bridge.mock_error(kind)
     }
 
-    // Dev: сгенерировать мок-запрос доступа агента (см. bridge.mock_permission).
+    // Dev (только debug-сборка): сгенерировать мок-запрос доступа агента.
     function mockPermission() {
-        bridge.mock_permission()
+        if (app.devTools)
+            bridge.mock_permission()
     }
 
     function notifyAgentFinished() {

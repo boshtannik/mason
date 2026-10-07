@@ -123,8 +123,10 @@ Item {
 
     // Dev-кнопка генерации мок-ошибок сервера: чтобы проверять отображение
     // ошибок в ленте без реального сервера (see bridge.mock_error).
+    // Видна только в debug-сборке (appWindow.devTools).
     IconButton {
         id: mockErrBtn
+        visible: appWindow.devTools
         width: Theme.itemSizeMedium
         height: Theme.itemSizeMedium
         anchors {

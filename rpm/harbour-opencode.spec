@@ -82,6 +82,9 @@ install -Dm 755 third_party/whisper.cpp/main %{buildroot}%{_libexecdir}/%{name}/
 # Piper: весь каталог целиком (бинарь + .so с RUNPATH=$ORIGIN + espeak-ng-data).
 mkdir -p %{buildroot}%{_libexecdir}/%{name}/piper
 cp -a /home/mersdk/cargo-cache/piper-aarch64/piper/. %{buildroot}%{_libexecdir}/%{name}/piper/
+echo "OC-SRC md5: $(md5sum /home/mersdk/cargo-cache/opencode-cli/opencode)"
+install -Dm 755 /home/mersdk/cargo-cache/opencode-cli/opencode %{buildroot}%{_libexecdir}/%{name}/opencode
+echo "OC-DST md5: $(md5sum %{buildroot}%{_libexecdir}/%{name}/opencode)"
 install -Dm 644 opencode-client/assets/models.json -t %{buildroot}%{_datadir}/%{name}
 install -Dm 644 harbour-opencode.png -t %{buildroot}%{_datadir}/icons/hicolor/86x86/apps
 install -Dm 644 harbour-opencode.desktop -t %{buildroot}%{_datadir}/applications
@@ -113,6 +116,7 @@ fi
 %{_bindir}/harbour-opencode
 %{_libexecdir}/%{name}/whisper-cli
 %{_libexecdir}/%{name}/piper
+%{_libexecdir}/%{name}/opencode
 %{_datadir}/%{name}/qml
 %{_datadir}/%{name}/translations
 %{_datadir}/%{name}/models.json

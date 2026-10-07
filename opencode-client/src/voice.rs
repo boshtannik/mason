@@ -1124,21 +1124,10 @@ pub async fn run_command(
             }
         }
         // Не-голосовые команды сюда не должны попадать: их обрабатывает
-        // диспетчер в main.rs. Перечисляем явно, чтобы расширение Cmd
-        // заставило компилятор следить и здесь, и в main.rs.
-        Some(Cmd::New)
-        | Some(Cmd::Open)
-        | Some(Cmd::Rename)
-        | Some(Cmd::Delete)
-        | Some(Cmd::DeleteAll)
-        | Some(Cmd::Fork)
-        | Some(Cmd::Permission)
-        | Some(Cmd::MockPermission)
-        | Some(Cmd::Share)
-        | Some(Cmd::Unshare)
-        | Some(Cmd::Summarize)
-        | Some(Cmd::Abort)
-        | Some(Cmd::SetModel) => {
+        // диспетчер в main.rs (там match по Cmd исчерпывающий — забыть
+        // вариант при расширении не выйдет). Здесь достаточно catch-all
+        // с логом, чтобы замечать случайный заход.
+        Some(action) => {
             log::warn!("voice::run_command: не-голосовая команда {action:?}");
         }
         None => {

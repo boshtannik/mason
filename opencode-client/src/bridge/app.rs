@@ -255,6 +255,8 @@ pub struct AppBridge {
     /// `session.error` с соответствующим типом. Полезно для отладки GUI без
     /// реального сервера. Строки кладём через ту же `human_session_error`,
     /// что и реальные события, — формат бабблов гарантированно совпадает.
+    /// Доступен только в debug-сборке (`cargo build` без `--release`).
+    #[cfg(debug_assertions)]
     mock_error: qt_method!(fn mock_error(&self, kind: QString) {
         let kind = kind.to_string();
         let payload = match kind.as_str() {
@@ -301,9 +303,17 @@ pub struct AppBridge {
     /// QML (dev): сгенерировать мок-запрос доступа, как будто агент запросил
     /// разрешение. Идёт через воркер (Cmd::MockPermission), чтобы пермишн
     /// попал в очередь диспетчера и не был затёрт периодическим снимком.
+    /// Доступен только в debug-сборке.
+    #[cfg(debug_assertions)]
     mock_permission: qt_method!(fn mock_permission(&self) {
         log::info!("QML mock_permission");
         self.push_command(serde_json::json!({ "cmd": Cmd::MockPermission }));
+    }),
+    /// QML (dev): идёт ли debug-сборка (true = кнопки моков доступны).
+    // Метод есть всегда, чтобы результат можно было прочитать и в release
+    // (там он просто false); сами мок-методы в release отсутствуют.
+    dev_tools: qt_method!(fn dev_tools(&self) -> bool {
+        cfg!(debug_assertions)
     }),
 }
 
