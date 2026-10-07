@@ -2,7 +2,7 @@
 # Жёсткий рестарт harbour-opencode: booster-ритуал из мем-заметок (PID=32537/send_prompt OK).
 echo "=== 1. убиваю harbour + booster'ы:"
 killall harbour-opencode 2>/dev/null
-echo 091772 | devel-su killall booster-silica-qt5 booster-qt5 2>/dev/null
+echo "${SFOS_PASS:?задайте SFOS_PASS}" | devel-su killall booster-silica-qt5 booster-qt5 2>/dev/null
 sleep 3
 
 echo "=== 2. чищу qmlcache (на случай старых скомпилированных):"

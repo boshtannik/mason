@@ -9,7 +9,7 @@
 # Использование:
 #   scripts/deploy.sh                           # бинарь debug aarch64
 #   scripts/deploy.sh -r                        # бинарь release aarch64
-#   SFOS_PASS=091772 scripts/deploy.sh -r       # с паролем
+#   SFOS_PASS=<your-ssh-password> scripts/deploy.sh -r   # с паролем
 set -e
 
 HOST="${SFOS_HOST:-172.28.172.1}"

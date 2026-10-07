@@ -1,7 +1,7 @@
 #!/bin/sh
 # Deploy + (опционально) перезапуск нового harbour-opencode probe.
 set -e
-PW=091772
+PW="${SFOS_PASS:?задайте SFOS_PASS (пароль root/devel-su на телефоне)}"
 echo "=== шаг 1: ставим rpm (деплой уже сделан, если rpm тот же) ==="
 echo "$PW" | devel-su sh -c 'rpm -Uvh --force /tmp/h.o.rpm' 2>&1 | tail -1
 echo "=== шаг 2: чистим qmlcache ==="

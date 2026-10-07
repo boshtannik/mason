@@ -1,7 +1,7 @@
 #!/bin/sh
 # Быстрый перезапуск harbour-opencode + проверка маркера инстанцирования корня.
 set -x
-echo 091772 | devel-su killall booster-silica-qt5 booster-qt5 booster-boostertest 2>/dev/null
+echo "${SFOS_PASS:?задайте SFOS_PASS}" | devel-su killall booster-silica-qt5 booster-qt5 booster-boostertest 2>/dev/null
 killall harbour-opencode 2>/dev/null
 sleep 2
 rm -rf ~/.cache/harbour-opencode/qmlcache

@@ -1,7 +1,8 @@
 #!/bin/sh
 # Чистый старт harbour-opencode на телефоне (по рабочему шаблону из заметок).
-# Выполнять на устройстве от defaultuser (пароль 091772); для devel-su тоже 091772.
-PW=091772
+# Выполнять на устройстве от defaultuser.
+# Пароль devel-su берётся из $SFOS_PASS.
+PW="${SFOS_PASS:?задайте SFOS_PASS (пароль devel-su)}"
 export XDG_RUNTIME_DIR=/run/user/100000
 export WAYLAND_DISPLAY=../../display/wayland-0
 export QT_QPA_PLATFORM=wayland

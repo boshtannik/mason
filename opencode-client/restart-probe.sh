@@ -1,9 +1,9 @@
 #!/bin/sh
-# Перезапуск harbour-opencode на телефоне ПОСЛЕ отката RPM к 839e5f5.
-# Пароль devuser/devel-su: 091772
+# Перезапуск harbour-opencode на телефоне (dev-хелпер).
+PW="${SFOS_PASS:?задайте SFOS_PASS (пароль devel-su)}"
 
 echo "=== 1. убиваем старые booster'ы (держат отравленный QML-кэш):"
-echo 091772 | devel-su killall booster-silica-qt5 booster-qt5 2>/dev/null
+echo "$PW" | devel-su killall booster-silica-qt5 booster-qt5 2>/dev/null
 killall harbour-opencode 2>/dev/null
 sleep 4
 
