@@ -55,9 +55,9 @@ pub struct AppBridge {
     /// Снимок активных тулов для ленты чата (JSON), пишет воркер.
     #[allow(dead_code)]
     tools_shared: Arc<Mutex<String>>,
-    /// Очередь запросов разрешений для диалога (JSON), пишет воркер.
+    /// JSON-статус настроек (работа с директорией и т.п.), пишет воркер/бэкенд.
     #[allow(dead_code)]
-    permissions_shared: Arc<Mutex<String>>,
+    settings_shared: Arc<Mutex<String>>,
 
     /// QML: забрать и очистить накопленные сообщения (polling).
     /// Элементы разделяем контрольным символом Record Separator (`\x1e`), а не
@@ -238,6 +238,30 @@ pub struct AppBridge {
     permissions_json: qt_method!(fn permissions_json(&self) -> QString {
         let v = self.permissions_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
+    }),
+    /// QML: настройки приложения как JSON `{"workdir":"...","..."}`.
+    settings_json: qt_method!(fn settings_json(&self) -> QString {
+        let v = self.settings_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+    /// QML: запросить текущие настройки.
+    get_settings: qt_method!(fn get_settings(&self) {
+        log::info!("QML get_settings");
+        self.push_command(serde_json::json!({ "cmd": Cmd::GetSettings }));
+    }),
+    /// QML: сохранить настройки (JSON-объект настроек).
+    save_settings: qt_method!(fn save_settings(&self, json: QString) {
+        let json = json.to_string();
+        log::info!("QML save_settings -> {json:?}");
+        if !json.is_empty() {
+            self.push_command(serde_json::json!({ "cmd": Cmd::SaveSettings, "value": json }));
+        }
+    }),
+    /// QML: установить рабочую директорию (строка пути).
+    set_workdir: qt_method!(fn set_workdir(&self, path: QString) {
+        let path = path.to_string();
+        log::info!("QML set_workdir -> {path:?}");
+        self.push_command(serde_json::json!({ "cmd": Cmd::SetWorkdir, "value": path }));
     }),
     /// QML: ответить на запрос разрешения (`response`: once | always | reject).
     answer_permission: qt_method!(fn answer_permission(&self, session: QString, id: QString, response: QString) {
