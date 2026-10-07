@@ -1,4 +1,6 @@
-# harbour-opencode
+# mason — native opencode client for Sailfish OS
+
+> Codename **mason**; packaged and distributed as **harbour-opencode**.
 
 Native [opencode](https://opencode.ai) client for **Sailfish OS**.
 
