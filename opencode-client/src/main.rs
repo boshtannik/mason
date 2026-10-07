@@ -124,8 +124,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .build()
                 .expect("tokio runtime");
             rt.block_on(async move {
-                // TODO: прочитать настройки из DConf/файла и передать cwd
-                let guard = server::ServerGuard::start(server::ServerConfig::default()).await;
+                let st = load_settings();
+                let workdir = st
+                    .get("workdir")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| default_workdir().to_string_lossy().to_string());
+                let cwd = std::path::PathBuf::from(workdir);
+                let _ = std::fs::create_dir_all(&cwd);
+                let guard = server::ServerGuard::start(server::ServerConfig { cwd: Some(cwd), ..Default::default() }).await;
                 let base = match &guard {
                     Ok(g) => {
                         log::info!("opencode serve поднят: {}", g.base_url());
