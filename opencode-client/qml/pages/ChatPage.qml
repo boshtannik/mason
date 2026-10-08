@@ -123,10 +123,10 @@ Item {
 
     // Dev-кнопка генерации мок-ошибок сервера: чтобы проверять отображение
     // ошибок в ленте без реального сервера (see bridge.mock_error).
-    // Видна только в debug-сборке (appWindow.devTools).
+    // Скрыта — в боевом интерфейсе не нужна.
     IconButton {
         id: mockErrBtn
-        visible: appWindow.devTools
+        visible: false
         width: Theme.itemSizeMedium
         height: Theme.itemSizeMedium
         anchors {
@@ -372,14 +372,8 @@ Item {
             right: parent.right
             bottom: parent.bottom
         }
-        height: input.visible
-                ? (Math.max(input.height, Theme.itemSizeMedium)
-                   + Theme.paddingMedium)
-                : (Theme.itemSizeMedium + Theme.paddingMedium)
-
-        // Максимальная высота поля ввода: 3 строки, чтобы не закрывало весь чат.
-        readonly property real maxInputHeight:
-            Theme.fontSizeSmall * 3 + Theme.paddingMedium * 2
+        // Один уровень ввода: высота панели = высота одной строки кнопок.
+        height: Theme.itemSizeMedium + Theme.paddingMedium
 
         // ── Константные раскладки панели ввода ──────────────────────────────
         // Вариантов мало — задаём каждый явно через State (анкеры), без
@@ -497,8 +491,7 @@ Item {
             visible: false
             width: Theme.itemSizeMedium
             height: Theme.itemSizeMedium
-            anchors.bottom: inputPanel.bottom
-            anchors.bottomMargin: Theme.paddingSmall
+            anchors.verticalCenter: inputPanel.verticalCenter
             // Горизонтальную привязку задаёт только state (left/центр/right),
             // чтобы не возникало конфликта анкеров при центровке.
             icon.source: (appWindow.recording || appWindow.recognizing)
@@ -528,8 +521,7 @@ Item {
             anchors {
                 right: inputPanel.right
                 rightMargin: Theme.paddingSmall
-                bottom: inputPanel.bottom
-                bottomMargin: Theme.paddingSmall
+                verticalCenter: inputPanel.verticalCenter
             }
             icon.source: "image://theme/icon-m-enter-accept"
             enabled: input.text.length > 0
@@ -547,8 +539,7 @@ Item {
             anchors {
                 right: inputPanel.right
                 rightMargin: Theme.paddingSmall
-                bottom: inputPanel.bottom
-                bottomMargin: Theme.paddingSmall
+                verticalCenter: inputPanel.verticalCenter
             }
             icon.source: "image://theme/icon-m-stop"
             onClicked: appWindow.stopAgent()
@@ -559,11 +550,14 @@ Item {
             visible: appWindow.inputMode !== "voice"
             enabled: !chatPage.busy
             background: null
+            // Плейсхолдер рисуем внутри поля, а не «этажом» сверху — иначе
+            // поле выглядит двухуровневым.
+            labelVisible: false
+            verticalAlignment: Text.AlignVCenter
             horizontalAlignment: Text.AlignLeft
-            // Высота растёт до 3 строк, дальше не растёт.
-            height: Math.min(implicitHeight, inputPanel.maxInputHeight)
-            anchors.bottom: inputPanel.bottom
-            anchors.bottomMargin: Theme.paddingSmall
+            // Одна строка той же высоты, что и кнопки: низ в один уровень.
+            height: Theme.itemSizeMedium
+            anchors.verticalCenter: inputPanel.verticalCenter
             // Дефолтные анкеры (ширина в стартовой раскладке [input, send]);
             // state переопределяет их под выбранную схему.
             anchors.left: inputPanel.left
