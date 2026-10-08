@@ -295,6 +295,12 @@ async fn run_stream(
     let mut current_session: Option<String> = None;
     // id ассистентских сообщений — только их текстовые части идят в ответ.
     let mut assistant_messages: std::collections::HashSet<String> = Default::default();
+    // «Мышление» модели: копим `session.next.reasoning.delta` текущего
+    // ассистентского сообщения; при «idle» кладём строкой `[[think]]` перед
+    // ответом (QML показывает/скрывает её по настройке showReasoning).
+    // TTS рассуждения не озвучивает: автоозвучка берёт только текст ответа.
+    let mut reasoning: String = String::new();
+    let mut reasoning_mid: Option<String> = None;
     // Периодический рефреш списка сессий (тикаем каждые 200мс; раз в ~3с — запрос).
     let mut ticks: u32 = 0;
 
@@ -337,6 +343,18 @@ async fn run_stream(
                             if assistant_messages.contains(mid) {
                                 parts.insert(id.to_string(), text);
                             }
+                        } else if let opencode_client::types::event::Event::SessionNextReasoningDelta {
+                            properties,
+                        } = &ev.payload
+                        {
+                            // Новый поток рассуждений (другое сообщение) сбрасывает
+                            // накопленное предыдущее — его ответ уже ушёл по idle.
+                            if reasoning_mid.as_deref() != Some(properties.assistantMessageID.as_str()) {
+                                reasoning_mid = Some(properties.assistantMessageID.clone());
+                                reasoning.clear();
+                            }
+                            reasoning.push_str(&properties.delta);
+                            log::debug!("reasoning: {} символов (mid={})", reasoning.len(), properties.assistantMessageID);
                         } else if let Some(session_id) = ev.payload.idle_session_id() {
                             if current_session.as_deref() == Some(session_id) {
                                 // Собрать накопленный ответ и отдать в QML.
@@ -345,11 +363,19 @@ async fn run_stream(
                                 let text: String = ans.iter().map(|s| s.as_str()).collect();
                                 if !text.trim().is_empty() {
                                     log::info!("push answer: {:?}", text);
+                                    // «Мышление» (если модель его прислала) — отдельной
+                                    // строкой [[think]] ПЕРЕД ответом.
+                                    if !reasoning.trim().is_empty() {
+                                        if let Ok(mut q) = worker_pending.lock() {
+                                            q.push(format!("[[t:{}]][[think]]{}", now_ms(), reasoning.trim_end()));
+                                        }
+                                    }
                                     if let Ok(mut q) = worker_pending.lock() {
                                         q.push(format!("[[t:{}]]{text}", now_ms()));
                                     }
                                     // Автоозвучка: весь ответ целиком (несколько бабблов внутри
                                     // одного ответа тоже собираются в `text` — см. память проекта).
+                                    // Рассуждения не озвучиваем.
                                     let tts_mode = voice
                                         .tts_mode
                                         .lock()
@@ -361,6 +387,8 @@ async fn run_stream(
                                 }
                                 set_status(&status, "idle");
                                 parts.clear();
+                                reasoning.clear();
+                                reasoning_mid = None;
                                 refresh_sessions(&client, &sessions).await;
                             }
                         }

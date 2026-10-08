@@ -254,10 +254,18 @@ Item {
                 var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
                 return b.substring(0, 4) === ">>> "
             }
+            // «Мышление» модели: строка `[[t:<ms>]][[think]]<text>` перед ответом.
+            // Рендерится утопленным курсивом; озвучка/кнопка для неё недоступны.
+            property bool isThink: {
+                var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
+                return b.substring(0, 8) === "[[think]]"
+            }
             // Ошибка сервера (лимит, доступ к ИИ и т.п.) — отображается красноватым.
             property bool isError: line.raw.indexOf("[ошибка сервера]") === 0
             property string body: {
                 var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
+                if (b.substring(0, 8) === "[[think]]")
+                    b = b.substring(8)
                 if (b.substring(0, 4) === ">>> ")
                     b = b.substring(4)
                 if (line.isError)
@@ -268,7 +276,7 @@ Item {
             // Ширина нижней строки: время + (для агента) кнопка озвучки + отступы.
             readonly property real footW: {
                 var w = tsLabel.implicitWidth
-                if (!line.isUser && line.tsMs !== ""
+                if (!line.isUser && !line.isThink && line.tsMs !== ""
                         && appWindow.ttsModelReady && appWindow.ttsMode !== "off")
                     w += Theme.itemSizeMedium + Theme.paddingSmall
                 return w
@@ -277,11 +285,13 @@ Item {
             Rectangle {
                 id: bubble
                 radius: Theme.paddingMedium
-                color: line.isUser
-                       ? Theme.highlightColor
-                       : (line.isError
-                          ? Qt.rgba(0.85, 0.15, 0.15, 0.18)
-                          : Theme.rgba(Theme.primaryColor, 0.12))
+                color: line.isThink
+                       ? Theme.rgba(Theme.primaryColor, 0.05)
+                       : (line.isUser
+                          ? Theme.highlightColor
+                          : (line.isError
+                             ? Qt.rgba(0.85, 0.15, 0.15, 0.18)
+                             : Theme.rgba(Theme.primaryColor, 0.12)))
                 width: Math.min(line.maxW,
                                 Math.max(textLabel.implicitWidth,
                                          line.footW + 2 * Theme.paddingSmall)
@@ -304,7 +314,8 @@ Item {
                     wrapMode: Text.Wrap
                     onLinkActivated: Qt.openUrlExternally(link)
                     font.pixelSize: Theme.fontSizeSmall
-                    color: Theme.primaryColor
+                    font.italic: line.isThink
+                    color: line.isThink ? Theme.secondaryColor : Theme.primaryColor
                 }
                 // Нижняя строка: время (+ для агента кнопка озвучки).
                 // Прижата к своему краю баббла, с отступами от краёв.
@@ -327,7 +338,7 @@ Item {
                     // кнопкой снизу.
                     IconButton {
                         id: speakBtn
-                        visible: !line.isUser
+                        visible: !line.isUser && !line.isThink
                                  && appWindow.ttsModelReady
                                  && appWindow.ttsMode !== "off"
                         width: visible ? Theme.itemSizeMedium : 0

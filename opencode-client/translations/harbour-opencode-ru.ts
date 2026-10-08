@@ -187,6 +187,16 @@ long press — remove</source>
         <source>Notification sound</source>
         <translation>Звук уведомления</translation>
     </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="200"/>
+        <source>Show model thinking (reasoning)</source>
+        <translation>Показывать мышление модели (рассуждения)</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="201"/>
+        <source>Show the model's reasoning as it works, not just final answers</source>
+        <translation>Показывать рассуждения модели по ходу работы, а не только готовые ответы</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>

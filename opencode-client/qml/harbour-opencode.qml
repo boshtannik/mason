@@ -32,6 +32,10 @@ ApplicationWindow {
                                      ? soundOnPermissionSetting.value : true
     property bool sendImmediately: sendImmediatelySetting.value !== undefined
                                    ? sendImmediatelySetting.value : false
+    // Показывать ли в ленте «мышление» модели (строки [[think]]), а не только
+    // готовые ответы. Включено по умолчанию.
+    property bool showReasoning: showReasoningSetting.value !== undefined
+                                 ? showReasoningSetting.value : true
     // Ожидающие запросы разрешений агента (`[{id,sessionID,action,resources,options}]`).
     property var pendingPermissions: []
     // Дать согласие «Разрешить один раз»: true, если запрос действительно новый
@@ -130,6 +134,10 @@ ApplicationWindow {
         id: sendImmediatelySetting
         key: "/apps/harbour-opencode/sendImmediately"
     }
+    ConfigurationValue {
+        id: showReasoningSetting
+        key: "/apps/harbour-opencode/showReasoning"
+    }
 
     // Держим процесс живым, пока агент работает (иначе Sailfish усыпит его в фоне).
     KeepAlive {
@@ -163,7 +171,16 @@ ApplicationWindow {
     // Очередь озвучки: WAV-файлы синтезируются воркером асинхронно
     // (несколько сообщений подряд = несколько файлов). Играем строго по
     // порядку появления: mediaplayer закончил → берём следующий из очереди.
+    // Каждый элемент — `{path, body}`: body — текст баббла, которому
+    // принадлежит файл, чтобы кнопка «стоп/озвучка» следовала за текущим
+    // воспроизводимым сообщением (см. speakingBubble).
     property var ttsQueue: []
+
+    // Тело последнего ответа агента — привязка автосинтезированных файлов
+    // к бабблу: воркер шлёт `[[tts]]<путь>` после соответствующих текстовых
+    // строк, поэтому запоминаем последний ответ. См. ttsEnqueue/playNextTts.
+    property string pendingTtsBody: ""
+
     MediaPlayer {
         id: ttsPlayer
         onPlaybackStateChanged: {
@@ -175,10 +192,14 @@ ApplicationWindow {
         if (app.ttsQueue.length === 0) {
             app.ttsPlaying = false
             app.ttsSynth = false
+            app.speakingBubble = ""
             return
         }
-        var p = app.ttsQueue.shift()
-        ttsPlayer.source = "file://" + p
+        var item = app.ttsQueue.shift()
+        ttsPlayer.source = "file://" + item.path
+        // Индикатор озвучки едет вместе с очередью: кнопка «стоп» включается
+        // на том баббле, чей звук реально сейчас играет.
+        app.speakingBubble = item.body
         app.ttsPlaying = true
         app.ttsSynth = false
         ttsPlayer.play()
@@ -186,7 +207,13 @@ ApplicationWindow {
     function ttsEnqueue(path) {
         if (path === "" || path === undefined)
             return
-        app.ttsQueue = app.ttsQueue.concat(path)
+        // К какому бабблу относится файл: для ручной кнопки это текст, который
+        // мы отправили на синтез (speakingBubble); для автоозвучки — последний
+        // ответ агента (pendingTtsBody).
+        var body = app.speakingBubble
+        if ((body === "" || body === undefined) && app.pendingTtsBody !== "")
+            body = app.pendingTtsBody
+        app.ttsQueue.push({ path: path, body: body })
         if (!app.ttsPlaying)
             app.playNextTts()
     }
@@ -223,6 +250,10 @@ ApplicationWindow {
             for (var i = 0; i < lines.length; i++) {
                 var line = lines[i]
                 if (line !== "") {
+                    // Строка без временной метки — используем для маркеров
+                    // [[think]] и для привязки автоозвучки к бабблу.
+                    var bodyTmp = line.replace(/^\[\[t:\d+\]\]/, "")
+
                     // Ошибка сервера (например "free usage exceeded") — сразу в нотификацию
                     // и в ленту, чтобы не выглядело, будто агент молча работает.
                     if (line.indexOf("[ошибка сервера]") === 0) {
@@ -232,6 +263,12 @@ ApplicationWindow {
                         acc = acc.concat(line)
                         continue
                     }
+
+                    // Рассуждения модели ([[think]]) — при настройке «показывать
+                    // мышление» Rust присылает их строкой перед ответом; если
+                    // отключено — просто не показываем.
+                    if (bodyTmp.substring(0, 8) === "[[think]]" && !app.showReasoning)
+                        continue
 
                     // Терминальный результат распознавания — снимаем лоадер.
                     if (line.substring(0, 7) === "[[stt]]"
@@ -264,6 +301,13 @@ ApplicationWindow {
                             app.ttsEnqueue(ttsPath)
                         continue
                     }
+
+                    // Запоминаем последний ответ агента — к нему привязываем
+                    // автосинтезированные WAV (идут после текста). Строчки
+                    // пользователя и рассуждения не считаем ответом.
+                    if (bodyTmp !== "" && bodyTmp.substring(0, 4) !== ">>> "
+                        && bodyTmp.substring(0, 8) !== "[[think]]")
+                        app.pendingTtsBody = bodyTmp.replace(/^\n+/, "")
 
                     acc = acc.concat(line)
                 }
@@ -479,6 +523,12 @@ ApplicationWindow {
     function abortSession(id) { bridge.abort_session(id) }
     function setModel(id, provider, model) { bridge.set_model(id, provider, model) }
 
+    function setShowReasoning(v) {
+        app.showReasoning = !!v
+        showReasoningSetting.value = app.showReasoning
+        showReasoningSetting.sync()
+    }
+
     onInputModeChanged: { inputModeSetting.value = app.inputMode; inputModeSetting.sync() }
     onShowToolsChanged: { showToolsSetting.value = app.showTools; showToolsSetting.sync() }
     onPttPositionChanged: { pttPositionSetting.value = app.pttPosition; pttPositionSetting.sync() }
@@ -490,6 +540,7 @@ ApplicationWindow {
     onSoundOnFinishChanged: { soundOnFinishSetting.value = app.soundOnFinish; soundOnFinishSetting.sync() }
     onSoundOnPermissionChanged: { soundOnPermissionSetting.value = app.soundOnPermission; soundOnPermissionSetting.sync() }
     onSendImmediatelyChanged: { sendImmediatelySetting.value = app.sendImmediately; sendImmediatelySetting.sync() }
+    onShowReasoningChanged: { showReasoningSetting.value = app.showReasoning; showReasoningSetting.sync() }
     onDingSoundChanged: { if (app.dingSound) dingSetting.value = app.dingSound; dingSetting.sync() }
 
     // При старте синхронизируем сохранённый режим озвучки (auto/button/off)

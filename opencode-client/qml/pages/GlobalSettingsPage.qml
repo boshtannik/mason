@@ -196,6 +196,13 @@ Item {
                 wrapMode: Text.Wrap
             }
 
+            TextSwitch {
+                text: qsTr("Show model thinking (reasoning)")
+                description: qsTr("Show the model's reasoning as it works, not just final answers")
+                checked: appWindow.showReasoning
+                onCheckedChanged: appWindow.setShowReasoning(checked)
+            }
+
             SectionHeader { text: qsTr("Notifications") }
 
             TextSwitch {
