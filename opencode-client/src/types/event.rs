@@ -1307,6 +1307,120 @@ impl Event {
         }
     }
 
+    /// Ид + текст накопленной части «мышления» (message.part.updated, reasoning).
+    /// Рассуждения модели приходят как обычные части (как и text), а не как
+    /// `session.next.reasoning.delta`; их текст в реплэе полный, по part.id.
+    pub fn reasoning_part(&self) -> Option<(&str, &str, String)> {
+        match self {
+            Event::MessagePartUpdated { properties } => match &properties.part {
+                Part::Reasoning { id, messageID, text } => {
+                    Some((messageID.as_str(), id.as_str(), text.clone()))
+                }
+                Part::Text { .. }
+                | Part::Reasoning { .. }
+                | Part::File { .. }
+                | Part::Tool { .. }
+                | Part::StepStart { .. }
+                | Part::StepFinish { .. }
+                | Part::Snapshot { .. }
+                | Part::Patch { .. }
+                | Part::Agent { .. }
+                | Part::Retry { .. }
+                | Part::Compaction { .. }
+                | Part::Subtask { .. } => None,
+            },
+            Event::ModelsDevRefreshed { .. }
+            | Event::IntegrationUpdated { .. }
+            | Event::IntegrationConnectionUpdated { .. }
+            | Event::CatalogUpdated { .. }
+            | Event::SessionCreated { .. }
+            | Event::SessionUpdated { .. }
+            | Event::SessionDeleted { .. }
+            | Event::MessageUpdated { .. }
+            | Event::MessageRemoved { .. }
+            | Event::MessagePartRemoved { .. }
+            | Event::SessionNextAgentSwitched { .. }
+            | Event::SessionNextModelSwitched { .. }
+            | Event::SessionNextMoved { .. }
+            | Event::SessionNextPrompted { .. }
+            | Event::SessionNextPromptAdmitted { .. }
+            | Event::SessionNextContextUpdated { .. }
+            | Event::SessionNextSynthetic { .. }
+            | Event::SessionNextShellStarted { .. }
+            | Event::SessionNextShellEnded { .. }
+            | Event::SessionNextStepStarted { .. }
+            | Event::SessionNextStepEnded { .. }
+            | Event::SessionNextStepFailed { .. }
+            | Event::SessionNextTextStarted { .. }
+            | Event::SessionNextTextDelta { .. }
+            | Event::SessionNextTextEnded { .. }
+            | Event::SessionNextReasoningStarted { .. }
+            | Event::SessionNextReasoningDelta { .. }
+            | Event::SessionNextReasoningEnded { .. }
+            | Event::SessionNextToolInputStarted { .. }
+            | Event::SessionNextToolInputDelta { .. }
+            | Event::SessionNextToolInputEnded { .. }
+            | Event::SessionNextToolCalled { .. }
+            | Event::SessionNextToolProgress { .. }
+            | Event::SessionNextToolSuccess { .. }
+            | Event::SessionNextToolFailed { .. }
+            | Event::SessionNextRetried { .. }
+            | Event::SessionNextCompactionStarted { .. }
+            | Event::SessionNextCompactionDelta { .. }
+            | Event::SessionNextCompactionEnded { .. }
+            | Event::SessionNextRevertStaged { .. }
+            | Event::SessionNextRevertCleared { .. }
+            | Event::SessionNextRevertCommitted { .. }
+            | Event::MessagePartDelta { .. }
+            | Event::SessionDiff { .. }
+            | Event::SessionError { .. }
+            | Event::InstallationUpdated { .. }
+            | Event::InstallationUpdateAvailable { .. }
+            | Event::FileEdited { .. }
+            | Event::ReferenceUpdated { .. }
+            | Event::PermissionV2Asked { .. }
+            | Event::PermissionV2Replied { .. }
+            | Event::PluginAdded { .. }
+            | Event::ProjectDirectoriesUpdated { .. }
+            | Event::FileWatcherUpdated { .. }
+            | Event::PtyCreated { .. }
+            | Event::PtyUpdated { .. }
+            | Event::PtyExited { .. }
+            | Event::PtyDeleted { .. }
+            | Event::QuestionV2Asked { .. }
+            | Event::QuestionV2Replied { .. }
+            | Event::QuestionV2Rejected { .. }
+            | Event::TodoUpdated { .. }
+            | Event::LspUpdated { .. }
+            | Event::PermissionAsked { .. }
+            | Event::PermissionReplied { .. }
+            | Event::TuiPromptAppend { .. }
+            | Event::TuiCommandExecute { .. }
+            | Event::TuiToastShow { .. }
+            | Event::TuiSessionSelect { .. }
+            | Event::McpToolsChanged { .. }
+            | Event::McpBrowserOpenFailed { .. }
+            | Event::CommandExecuted { .. }
+            | Event::ProjectUpdated { .. }
+            | Event::SessionStatus { .. }
+            | Event::SessionIdle { .. }
+            | Event::QuestionAsked { .. }
+            | Event::QuestionReplied { .. }
+            | Event::QuestionRejected { .. }
+            | Event::SessionCompacted { .. }
+            | Event::VcsBranchUpdated { .. }
+            | Event::WorkspaceReady { .. }
+            | Event::WorkspaceFailed { .. }
+            | Event::WorkspaceStatus { .. }
+            | Event::WorktreeReady { .. }
+            | Event::WorktreeFailed { .. }
+            | Event::ServerConnected { .. } | Event::ServerHeartbeat { .. }
+            | Event::GlobalDisposed { .. }
+            | Event::ServerInstanceDisposed { .. }
+            | Event::Sync { .. } => None,
+        }
+    }
+
     /// messageID, если событие — обновление ассистентского сообщения.
     pub fn assistant_message_id(&self) -> Option<&str> {
         match self {

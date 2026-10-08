@@ -258,14 +258,14 @@ Item {
             // Рендерится утопленным курсивом; озвучка/кнопка для неё недоступны.
             property bool isThink: {
                 var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
-                return b.substring(0, 8) === "[[think]]"
+                return b.indexOf("[[think]]") === 0
             }
             // Ошибка сервера (лимит, доступ к ИИ и т.п.) — отображается красноватым.
             property bool isError: line.raw.indexOf("[ошибка сервера]") === 0
             property string body: {
                 var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
-                if (b.substring(0, 8) === "[[think]]")
-                    b = b.substring(8)
+                if (b.indexOf("[[think]]") === 0)
+                    b = b.substring("[[think]]".length)
                 if (b.substring(0, 4) === ">>> ")
                     b = b.substring(4)
                 if (line.isError)

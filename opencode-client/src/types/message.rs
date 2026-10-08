@@ -92,7 +92,12 @@ pub enum Part {
         ignored: Option<bool>,
     },
     #[serde(rename = "reasoning")]
-    Reasoning { id: String, text: String },
+    Reasoning {
+        id: String,
+        #[serde(default)]
+        messageID: String,
+        text: String,
+    },
     #[serde(rename = "file")]
     File {
         id: String,
