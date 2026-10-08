@@ -55,6 +55,9 @@ pub struct AppBridge {
     /// Снимок активных тулов для ленты чата (JSON), пишет воркер.
     #[allow(dead_code)]
     tools_shared: Arc<Mutex<String>>,
+    /// Очередь запросов разрешений для диалога (JSON), пишет воркер.
+    #[allow(dead_code)]
+    permissions_shared: Arc<Mutex<String>>,
     /// JSON-статус настроек (работа с директорией и т.п.), пишет воркер/бэкенд.
     #[allow(dead_code)]
     settings_shared: Arc<Mutex<String>>,
