@@ -280,7 +280,7 @@ async fn run_stream(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
-    _settings: Arc<std::sync::Mutex<String>>,
+    settings: Arc<std::sync::Mutex<String>>,
 ) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
 
