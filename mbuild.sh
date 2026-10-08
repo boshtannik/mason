@@ -96,7 +96,9 @@ docker run --rm \
   # в RPM мог уехать не тот открытод.
   OC_SHA256="01edb5839aa10d5b09133fedcb335a062ecad6e82552933bb14f71756f2b296b"
   OC_CLI="$HOME/cargo-cache/opencode-cli"
-  OC_SHA_HAVE=$(sha256sum "$OC_CLI/opencode" 2>/dev/null)
+  # set -e: sha256sum отсутствующего файла умирает с 1 — это не ошибка,
+  # а признак «надо скачать» (проверяется в if ниже).
+  OC_SHA_HAVE=$(sha256sum "$OC_CLI/opencode" 2>/dev/null || true)
   OC_SHA_HAVE=${OC_SHA_HAVE%% *}
   if [ ! -e "$OC_CLI/opencode" ] \
      || [ "$(cat "$OC_CLI/opencode.version" 2>/dev/null)" != "$OC_VERSION" ] \
@@ -116,6 +118,28 @@ docker run --rm \
   mb2 -n -t SailfishOS-5.1.0.11-aarch64 --no-snapshot=force build
   echo "=== RPM ($MBUILD_MODE) ==="
   ls -l RPMS/*.rpm
+  # Верификация: внутрь RPM обязан попасть ТОЧНО пинированный opencode.
+  # В прошлом brp-strip ужинал Bun-бинарь и в RPM уезжал бинарь без "serve"
+  # (1.3.14 вместо 1.18.30), хотя в buildroot клали правильный файл.
+  OC_RPM="$(pwd)/$(ls RPMS/*.rpm | head -1)"
+  echo "проверяю opencode внутри RPM: $OC_RPM"
+  rm -rf /tmp/ocverify && mkdir -p /tmp/ocverify && cd /tmp/ocverify
+  rpm2cpio "$OC_RPM" | cpio -id --quiet "./usr/libexec/harbour-opencode/opencode" >/dev/null 2>&1 || true
+  if [ ! -f usr/libexec/harbour-opencode/opencode ]; then
+    echo "ОШИБКА: не удалось извлечь opencode из RPM (rpm2cpio/cpio)"
+    exit 1
+  fi
+  OC_VERIFY="$(sha256sum usr/libexec/harbour-opencode/opencode | awk "{print \$1}")"
+  echo "opencode в RPM sha256: $OC_VERIFY"
+  if [ "$OC_VERIFY" != "$OC_SHA256" ]; then
+    echo "ОШИБКА: в RPM уехал НЕ пинированный opencode."
+    echo "ожидался: $OC_SHA256"
+    echo "реально:  $OC_VERIFY"
+    echo "похоже, rpmbuild снова урезал бинарь — проверь %global __strip / debug_package в spec."
+    exit 1
+  fi
+  echo "opencode в RPM: совпадает с пином — OK"
+  cd - >/dev/null
   cp -v RPMS/*.rpm /out/
 '
 

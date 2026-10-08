@@ -16,6 +16,13 @@ BuildRequires:  pkgconfig(Qt5Quick)
 BuildRequires:  pkgconfig(sailfishapp)
 BuildRequires:  qt5-qttools-linguist
 
+# НЕ давать rpmbuild урезать/стрипать бандл. brp-strip (и find-debuginfo)
+# обрезают не-аллоцированные секции Bun-бинаря opencode, после чего он
+# теряет встроенный CLI ("serve") и падает с "'Script not found serve'"
+# (--version вместо 1.18.30 показывает 1.3.14 — версию самой Bun). Поэтому:
+%global debug_package %{nil}
+%global __strip /bin/true
+
 %description
 Native client for the opencode AI coding agent. Connects to the local
 opencode server over SSE and provides a Silica chat UI.
