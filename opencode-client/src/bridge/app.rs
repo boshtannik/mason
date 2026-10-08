@@ -266,6 +266,53 @@ pub struct AppBridge {
         log::info!("QML set_workdir -> {path:?}");
         self.push_command(serde_json::json!({ "cmd": Cmd::SetWorkdir, "value": path }));
     }),
+    /// QML: домашняя директория пользователя (стартовая точка проводника).
+    app_home: qt_method!(fn app_home(&self) -> QString {
+        let h = std::env::var("HOME").unwrap_or_default();
+        QString::from(if h.is_empty() { "/".to_string() } else { h })
+    }),
+    /// QML: список подкаталогов директории как JSON
+    /// `{"ok":bool,"path":"…","entries":[{"name":"…","isDir":true,"path":"…"}]}`.
+    /// `ok=false` — директория недоступна для чтения. Для проводника рабочей
+    /// директории берём только каталоги (включая каталоги-символические
+    /// ссылки, если они разрешаются); скрытые пропускаем. Сортировка по имени.
+    list_dir: qt_method!(fn list_dir(&self, path: QString) -> QString {
+        let dir = path.to_string();
+        let p = std::path::Path::new(&dir);
+        let mut entries: Vec<serde_json::Value> = Vec::new();
+        let mut ok = false;
+        if let Ok(rd) = std::fs::read_dir(p) {
+            ok = true;
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') || name == ".." {
+                    continue;
+                }
+                let is_dir = std::fs::metadata(e.path())
+                    .map(|m| m.is_dir())
+                    .unwrap_or(false);
+                if !is_dir {
+                    continue;
+                }
+                entries.push(serde_json::json!({
+                    "name": name,
+                    "isDir": true,
+                    "path": e.path().display().to_string(),
+                }));
+            }
+        }
+        entries.sort_by(|a, b| {
+            let an = a["name"].as_str().unwrap_or("");
+            let bn = b["name"].as_str().unwrap_or("");
+            an.to_lowercase().cmp(&bn.to_lowercase())
+        });
+        let out = serde_json::json!({
+            "ok": ok,
+            "path": p.display().to_string(),
+            "entries": entries,
+        });
+        QString::from(out.to_string())
+    }),
     /// QML: ответить на запрос разрешения (`response`: once | always | reject).
     answer_permission: qt_method!(fn answer_permission(&self, session: QString, id: QString, response: QString) {
         let session = session.to_string();

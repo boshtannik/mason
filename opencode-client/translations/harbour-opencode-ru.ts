@@ -187,6 +187,74 @@ long press — remove</source>
         <source>Notification sound</source>
         <translation>Звук уведомления</translation>
     </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="200"/>
+        <source>The agent creates and edits files here and runs commands from this directory.</source>
+        <translation>Агент создаёт и редактирует файлы здесь и выполняет команды из этой директории.</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="201"/>
+        <source>Browse…</source>
+        <translation>Открыть…</translation>
+    </message>
+</context>
+<context>
+    <name>DirPickerPage</name>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="20"/>
+        <source>Working directory</source>
+        <translation>Рабочая директория</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="40"/>
+        <source>Home</source>
+        <translation>Домой</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="46"/>
+        <source>Root</source>
+        <translation>Корень</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="51"/>
+        <source>Type path…</source>
+        <translation>Ввести путь…</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="65"/>
+        <source>e.g. /home/defaultuser/mason</source>
+        <translation>напр. /home/defaultuser/mason</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="75"/>
+        <source>Filter…</source>
+        <translation>Фильтр…</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="83"/>
+        <source>Use this folder</source>
+        <translation>Использовать эту папку</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="91"/>
+        <source>Tap a folder to open it, long press to select it</source>
+        <translation>Тапните папку, чтобы войти; длинное нажатие — выбрать</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="112"/>
+        <source>Up one level</source>
+        <translation>На уровень выше</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="135"/>
+        <source>Not accessible</source>
+        <translation>Не удалось открыть</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/DirPickerPage.qml" line="137"/>
+        <source>Empty directory</source>
+        <translation>Пустая директория</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>

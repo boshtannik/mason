@@ -190,6 +190,31 @@ Item {
             Label {
                 x: Theme.horizontalPageMargin
                 width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("The agent creates and edits files here and runs commands from this directory.")
+                color: Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+                wrapMode: Text.Wrap
+            }
+
+            Button {
+                text: qsTr("Browse…")
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                onClicked: {
+                    var start = workdirField.text.length > 0
+                                ? workdirField.text
+                                : (typeof appWindow.workdir !== "undefined" ? appWindow.workdir : "")
+                    globalSettingsPage.appWindow.pageStack.push(
+                        dirPickerComponent,
+                        { appWindow: globalSettingsPage.appWindow,
+                          startPath: start,
+                          targetField: workdirField })
+                }
+            }
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
                 text: qsTr("Changes take effect after restarting the app")
                 color: Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeExtraSmall
@@ -287,5 +312,10 @@ Item {
     Component {
         id: voiceModelsComponent
         VoiceModelsPage { }
+    }
+
+    Component {
+        id: dirPickerComponent
+        DirPickerPage { }
     }
 }
