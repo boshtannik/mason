@@ -1209,7 +1209,6 @@ fn save_settings_file(v: &serde_json::Value) {
 }
 
 fn default_workdir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".into());
-    std::path::PathBuf::from(home).join("mason")
+    std::path::PathBuf::from("/home/defaultuser/mason")
 }
 
