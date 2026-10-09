@@ -33,6 +33,8 @@ pub enum Cmd {
     Summarize,
     Abort,
     SetModel,
+    /// Переключить агента/режим сессии: Build | Plan.
+    SetMode,
     VoiceLang,
     VoiceSelectStt,
     VoiceSelectTts,

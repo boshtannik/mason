@@ -191,6 +191,23 @@ impl OpenCodeClient {
         Ok(())
     }
 
+    /// POST /api/session/{id}/agent -> переключить агента сессии (Build/Plan).
+    /// Меняет алгоритм последующих ходов: build — активная работа
+    /// (файлы/команды), plan — планирование без изменений.
+    pub async fn set_session_agent(&self, session_id: &str, agent: &str) -> Result<(), String> {
+        let url = format!("{}/api/session/{session_id}/agent", self.base);
+        let resp = self
+            .authed(self.http.post(&url))
+            .json(&serde_json::json!({ "agent": agent }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("set_session_agent status: {}", resp.status()));
+        }
+        Ok(())
+    }
+
     /// GET /session/{id}/message -> `[{ info: Message, parts: [...] }]`.
     pub async fn session_messages(&self, session_id: &str) -> Result<serde_json::Value, String> {
         let url = format!("{}/session/{session_id}/message", self.base);

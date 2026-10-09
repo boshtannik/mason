@@ -36,6 +36,12 @@ ApplicationWindow {
     // готовые ответы. Включено по умолчанию.
     property bool showReasoning: showReasoningSetting.value !== undefined
                                  ? showReasoningSetting.value : true
+    // Режим чата (агент сессии): "build" — активная работа, "plan" — планирование.
+    // Двухпозиционный, применяется к текущей сессии (см. setChatMode).
+    property string chatMode: chatModeSetting.value === "plan" ? "plan" : "build"
+    // К какой сессии уже применён сохранённый режим (чтобы не дёргать сервер
+    // на каждый poll одинаковым переключением агента).
+    property string chatModeAppliedSession: ""
     // Ожидающие запросы разрешений агента (`[{id,sessionID,action,resources,options}]`).
     property var pendingPermissions: []
     // Дать согласие «Разрешить один раз»: true, если запрос действительно новый
@@ -137,6 +143,10 @@ ApplicationWindow {
     ConfigurationValue {
         id: showReasoningSetting
         key: "/apps/harbour-opencode/showReasoning"
+    }
+    ConfigurationValue {
+        id: chatModeSetting
+        key: "/apps/harbour-opencode/mode"
     }
 
     // Держим процесс живым, пока агент работает (иначе Sailfish усыпит его в фоне).
@@ -352,8 +362,15 @@ ApplicationWindow {
             }
         }
         var cid = bridge.current_session_id()
-        if (cid !== undefined && cid !== null && cid !== app.currentSessionId)
+        if (cid !== undefined && cid !== null && cid !== app.currentSessionId) {
             app.currentSessionId = cid
+            // Новая сессия активирована — применяем выбранный в настройках
+            // режим чата (Build/Plan), если ещё не применяли к этой сессии.
+            if (cid !== "" && cid !== app.chatModeAppliedSession) {
+                app.chatModeAppliedSession = cid
+                bridge.set_mode(cid, app.chatMode)
+            }
+        }
         var nav = bridge.take_nav()
         if (nav !== undefined && nav >= 0)
             app.requestPage(nav)
@@ -527,6 +544,20 @@ ApplicationWindow {
         app.showReasoning = !!v
         showReasoningSetting.value = app.showReasoning
         showReasoningSetting.sync()
+    }
+
+    function setChatMode(v) {
+        if (v !== "build" && v !== "plan")
+            return
+        app.chatMode = v
+        chatModeSetting.value = app.chatMode
+        chatModeSetting.sync()
+        // Применяем сразу к текущей сессии; при смене сессии режим
+        // переприменится в poll() (см. chatModeAppliedSession).
+        if (app.currentSessionId !== "") {
+            app.chatModeAppliedSession = app.currentSessionId
+            bridge.set_mode(app.currentSessionId, app.chatMode)
+        }
     }
 
     onInputModeChanged: { inputModeSetting.value = app.inputMode; inputModeSetting.sync() }

@@ -197,6 +197,26 @@ long press — remove</source>
         <source>Show the model's reasoning as it works, not just final answers</source>
         <translation>Показывать рассуждения модели по ходу работы, а не только готовые ответы</translation>
     </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="217"/>
+        <source>Chat mode</source>
+        <translation>Режим чата</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="218"/>
+        <source>Build — works with files and runs commands; Plan — planning only, no changes</source>
+        <translation>Build — работает с файлами и выполняет команды; Plan — только планирование, без изменений</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="221"/>
+        <source>Build</source>
+        <translation>Build</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="222"/>
+        <source>Plan</source>
+        <translation>Plan</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>

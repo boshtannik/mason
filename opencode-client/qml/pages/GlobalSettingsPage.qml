@@ -203,6 +203,21 @@ Item {
                 onCheckedChanged: appWindow.setShowReasoning(checked)
             }
 
+            ComboBox {
+                label: qsTr("Chat mode")
+                description: qsTr("Build — works with files and runs commands; Plan — planning only, no changes")
+                currentIndex: ["build", "plan"].indexOf(appWindow.chatMode)
+                menu: ContextMenu {
+                    MenuItem { text: qsTr("Build") }
+                    MenuItem { text: qsTr("Plan") }
+                }
+                onCurrentIndexChanged: {
+                    var v = ["build", "plan"]
+                    if (currentIndex >= 0 && currentIndex < v.length)
+                        appWindow.setChatMode(v[currentIndex])
+                }
+            }
+
             SectionHeader { text: qsTr("Notifications") }
 
             TextSwitch {

@@ -207,6 +207,17 @@ pub struct AppBridge {
             }));
         }
     }),
+    /// QML: переключить режим/агента сессии (Build | Plan).
+    set_mode: qt_method!(fn set_mode(&self, id: QString, mode: QString) {
+        let id = id.to_string();
+        let mode = mode.to_string();
+        log::info!("QML set_mode {id:?} -> {mode:?}");
+        if !id.is_empty() {
+            self.push_command(serde_json::json!({
+                "cmd": Cmd::SetMode, "id": id, "mode": mode
+            }));
+        }
+    }),
     /// QML: забрать запрошенную страницу карусели (или -1).
     take_nav: qt_method!(fn take_nav(&self) -> i32 {
         self.nav_shared

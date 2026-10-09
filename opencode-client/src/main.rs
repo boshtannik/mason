@@ -598,6 +598,16 @@ async fn run_stream(
                                 Err(e) => log::error!("set_model: {e}"),
                             }
                         }
+                        Some(Cmd::SetMode) => {
+                            if sid.is_empty() {
+                                continue;
+                            }
+                            let mode = cmd["mode"].as_str().unwrap_or("");
+                            match client.set_session_agent(sid, mode).await {
+                                Ok(()) => log::info!("set_mode {sid} -> {mode}"),
+                                Err(e) => log::error!("set_mode: {e}"),
+                            }
+                        }
                         Some(Cmd::Rename) => {
                             if sid.is_empty() {
                                 continue;
