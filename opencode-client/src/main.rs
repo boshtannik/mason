@@ -13,6 +13,7 @@ use opencode_client::api;
 use opencode_client::bridge::app::AppBridge;
 use opencode_client::cmd::Cmd;
 use opencode_client::event;
+use opencode_client::markers::*;
 use opencode_client::server;
 use opencode_client::voice;
 
@@ -329,7 +330,7 @@ async fn run_stream(
                             }
                             log::error!("session.error: {msg}");
                             if let Ok(mut q) = worker_pending.lock() {
-                                q.push(format!("[ошибка сервера] {msg}"));
+                                q.push(format!("{ERR_PREFIX} {msg}"));
                             }
                             set_status(&status, "error");
                         }
@@ -367,11 +368,13 @@ async fn run_stream(
                                     if !reasoning.trim().is_empty() {
                                         log::info!("push reasoning: {} символов", reasoning.chars().count());
                                         if let Ok(mut q) = worker_pending.lock() {
-                                            q.push(format!("[[t:{}]][[think]]{}", now_ms(), reasoning.trim_end()));
+                                            let body =
+                                                format!("{THINK_TAG}{}", reasoning.trim_end());
+                                            q.push(proto_line(now_ms(), &body));
                                         }
                                     }
                                     if let Ok(mut q) = worker_pending.lock() {
-                                        q.push(format!("[[t:{}]]{text}", now_ms()));
+                                        q.push(proto_line(now_ms(), &text));
                                     }
                                     // Автоозвучка: весь ответ целиком (несколько бабблов внутри
                                     // одного ответа тоже собираются в `text` — см. память проекта).
@@ -1006,12 +1009,29 @@ async fn load_history(
                 let role = e["info"]["role"].as_str().unwrap_or("");
                 let created = e["info"]["time"]["created"].as_u64().unwrap_or(0);
                 let mut text = String::new();
+                // Рассуждения модели копим отдельно: они приходят как части
+                // `type:"reasoning"` и на ленте показываются строкой [[think]]
+                // ПЕРЕД ответом (как при живом стриме) — иначе после перезапуска
+                // приложения мышление из истории пропадало.
+                let mut reasoning = String::new();
+                let mut reasoning_ts = created;
                 if let Some(parts) = e["parts"].as_array() {
                     for p in parts {
-                        if p["type"].as_str() == Some("text") {
-                            if let Some(t) = p["text"].as_str() {
-                                text.push_str(t);
+                        match p["type"].as_str() {
+                            Some("text") => {
+                                if let Some(t) = p["text"].as_str() {
+                                    text.push_str(t);
+                                }
                             }
+                            Some("reasoning") => {
+                                if let Some(t) = p["text"].as_str() {
+                                    if reasoning.is_empty() {
+                                        reasoning_ts = p["time"]["start"].as_u64().unwrap_or(created);
+                                    }
+                                    reasoning.push_str(t);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -1019,9 +1039,13 @@ async fn load_history(
                     continue;
                 }
                 if role == "user" {
-                    lines.push(format!("[[t:{created}]]>>> {text}"));
+                    lines.push(proto_line(created, &format!("{USER_PREFIX}{text}")));
                 } else {
-                    lines.push(format!("[[t:{created}]]{text}"));
+                    if !reasoning.trim().is_empty() {
+                        let body = format!("{THINK_TAG}{}", reasoning.trim_end());
+                        lines.push(proto_line(reasoning_ts, &body));
+                    }
+                    lines.push(proto_line(created, &text));
                 }
             }
             log::info!("история сессии {session_id}: {} строк", lines.len());

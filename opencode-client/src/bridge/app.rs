@@ -2,6 +2,7 @@ use qmetaobject::*;
 use std::sync::{Arc, Mutex};
 
 use crate::cmd::Cmd;
+use crate::markers::*;
 
 /// Мост Rust-core ←→ QML.
 ///
@@ -335,7 +336,7 @@ pub struct AppBridge {
         let msg = crate::types::event::human_session_error(Some(&payload));
         log::info!("QML mock_error {kind:?} -> {msg:?}");
         if let Ok(mut q) = self.pending_messages.lock() {
-            q.push(format!("[ошибка сервера] {msg}"));
+            q.push(format!("{ERR_PREFIX} {msg}"));
         }
     }),
     /// QML (dev): сгенерировать мок-запрос доступа, как будто агент запросил

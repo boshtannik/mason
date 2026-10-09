@@ -240,36 +240,37 @@ Item {
         Item {
             id: line
             width: chatList.width
-            height: bubble.height + Theme.paddingSmall
+            // «Мышление» модели: биндинг на переключатель «показывать мышление»
+            // скрывает/показывает уже отрисованные строки [[think]] сразу, без
+            // переоткрытия сессии (новые при выключенной настройке не копятся —
+            // их отсекает poll() в корневом QML).
+            visible: appWindow.showReasoning || !line.isThink
+            height: visible ? bubble.height + Theme.paddingSmall : 0
 
             // Сырая строка от воркера: `[[t:<ms>]]>>> текст` (юзер) или
             // `[[t:<ms>]]текст` (агент); живой юзер от `send()` — `[[t:<ms>]]>>> текст`.
             property string raw: "" + modelData
             property string tsMs: {
-                var m = /\[\[t:(\d+)\]\]/.exec(line.raw)
+                var m = appWindow.tsRe.exec(line.raw)
                 return m ? m[1] : ""
             }
             // Юзер-строки помечены префиксом «>>> » ПОСЛЕ таймстампа.
-            property bool isUser: {
-                var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
-                return b.substring(0, 4) === ">>> "
-            }
+            property bool isUser: appWindow.lineIs(appWindow.stripTs(line.raw),
+                                                  appWindow.kUserPrefix)
             // «Мышление» модели: строка `[[t:<ms>]][[think]]<text>` перед ответом.
             // Рендерится утопленным курсивом; озвучка/кнопка для неё недоступны.
-            property bool isThink: {
-                var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
-                return b.indexOf("[[think]]") === 0
-            }
+            property bool isThink: appWindow.lineIs(appWindow.stripTs(line.raw),
+                                                   appWindow.kThinkTag)
             // Ошибка сервера (лимит, доступ к ИИ и т.п.) — отображается красноватым.
-            property bool isError: line.raw.indexOf("[ошибка сервера]") === 0
+            property bool isError: appWindow.lineIs(line.raw, appWindow.kErrPrefix)
             property string body: {
-                var b = line.raw.replace(/^\[\[t:\d+\]\]/, "")
-                if (b.indexOf("[[think]]") === 0)
-                    b = b.substring("[[think]]".length)
-                if (b.substring(0, 4) === ">>> ")
-                    b = b.substring(4)
+                var b = appWindow.stripTs(line.raw)
+                if (appWindow.lineIs(b, appWindow.kThinkTag))
+                    b = b.substring(appWindow.kThinkTag.length)
+                if (appWindow.lineIs(b, appWindow.kUserPrefix))
+                    b = b.substring(appWindow.kUserPrefix.length)
                 if (line.isError)
-                    b = b.replace(/^\[ошибка сервера\]\s*/, "")
+                    b = b.replace(appWindow.errRe, "")
                 return b.replace(/^\n+/, "")
             }
             readonly property real maxW: chatList.width - 2 * Theme.horizontalPageMargin

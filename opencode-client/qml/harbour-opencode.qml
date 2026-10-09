@@ -32,16 +32,54 @@ ApplicationWindow {
                                      ? soundOnPermissionSetting.value : true
     property bool sendImmediately: sendImmediatelySetting.value !== undefined
                                    ? sendImmediatelySetting.value : false
+    // ── Маркеры протокола «воркер ↔ QML» ───────────────────────────────────────
+    // Зеркало opencode-client/src/markers.rs. Оба файла менять синхронно:
+    // условия сравнивают через эти константы, а не через сырые строки —
+    // это убирает класс багов с неверной длиной префикса (был substring(0,8)
+    // против 9-символьного [[think]]).
+    readonly property string kTsOpen: "[[t:"
+    readonly property string kTsClose: "]]"
+    readonly property string kThinkTag: "[[think]]"
+    readonly property string kUserPrefix: ">>> "
+    readonly property string kErrPrefix: "[ошибка сервера]"
+    readonly property string kSttTag: "[[stt]]"
+    readonly property string kTtsTag: "[[tts]]"
+    readonly property string kVoicePrefix: "[голос]"
+    // Экран специальных символов для RegExp (строится из констант маркеров).
+    function reEscape(s) {
+        return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    }
+    // Регэксп таймстампа `[[t:<мс>]]` — собирается из констант (markers.rs: proto_line).
+    // Группа 1 — миллисекунды. Условия и срезы через константы, не через сырые строки.
+    readonly property var tsRe: new RegExp(
+        "^" + reEscape(app.kTsOpen) + "(\\d+)" + reEscape(app.kTsClose))
+    // Регэксп среза префикса ошибки сервера (для отображения текста ошибки).
+    readonly property var errRe: new RegExp(
+        "^" + reEscape(app.kErrPrefix) + "\\s*")
+    // Срезать `[[t:<мс>]]` с начала строки ленты.
+    function stripTs(s) {
+        return s.replace(app.tsRe, "")
+    }
+    // Строка ленты начинается ровно с метки-префикса (исключая таймстамп).
+    function lineIs(line, tag) {
+        return line.indexOf(tag) === 0
+    }
     // Показывать ли в ленте «мышление» модели (строки [[think]]), а не только
-    // готовые ответы. Включено по умолчанию.
+    // готовые ответы. Включено по умолчанию. Это настройка ОТОБРАЖЕНИЯ
+    // клиента (в отличие от режима сессии), поэтому живёт в глобальных
+    // настройках, а не в настройках конкретной сессии.
     property bool showReasoning: showReasoningSetting.value !== undefined
                                  ? showReasoningSetting.value : true
-    // Режим чата (агент сессии): "build" — активная работа, "plan" — планирование.
-    // Двухпозиционный, применяется к текущей сессии (см. setChatMode).
-    property string chatMode: chatModeSetting.value === "plan" ? "plan" : "build"
-    // К какой сессии уже применён сохранённый режим (чтобы не дёргать сервер
-    // на каждый poll одинаковым переключением агента).
-    property string chatModeAppliedSession: ""
+    // Режим чата по сессиям: `{ "<sessionID>": "build"|"plan" }`. Режим — это
+    // свойство каждой сессии (агент: build — активная работа, plan —
+    // планирование); выбор хранится за конкретной сессией и применяется при
+    // её открытии (см. sessionMode/setSessionMode и применение в poll()).
+    property var sessionModes: sessionModesSetting.value
+                               ? JSON.parse(sessionModesSetting.value)
+                               : ({})
+    // Сессии, к которым уже применяли сохранённый режим (не дёргаем сервер
+    // повторно на каждом poll одним и тем же переключением агента).
+    property var sessionModesApplied: ({})
     // Ожидающие запросы разрешений агента (`[{id,sessionID,action,resources,options}]`).
     property var pendingPermissions: []
     // Дать согласие «Разрешить один раз»: true, если запрос действительно новый
@@ -144,9 +182,10 @@ ApplicationWindow {
         id: showReasoningSetting
         key: "/apps/harbour-opencode/showReasoning"
     }
+    // Реестр режимов по сессиям: JSON-строка `{"<sessionID>":"build"|"plan",...}`.
     ConfigurationValue {
-        id: chatModeSetting
-        key: "/apps/harbour-opencode/mode"
+        id: sessionModesSetting
+        key: "/apps/harbour-opencode/sessionModes"
     }
 
     // Держим процесс живым, пока агент работает (иначе Sailfish усыпит его в фоне).
@@ -262,13 +301,13 @@ ApplicationWindow {
                 if (line !== "") {
                     // Строка без временной метки — используем для маркеров
                     // [[think]] и для привязки автоозвучки к бабблу.
-                    var bodyTmp = line.replace(/^\[\[t:\d+\]\]/, "")
+                    var bodyTmp = app.stripTs(line)
 
                     // Ошибка сервера (например "free usage exceeded") — сразу в нотификацию
                     // и в ленту, чтобы не выглядело, будто агент молча работает.
-                    if (line.indexOf("[ошибка сервера]") === 0) {
+                    if (app.lineIs(line, app.kErrPrefix)) {
                         app.recognizing = false
-                        var errText = line.substring("[ошибка сервера]".length).replace(/^\s+/, "")
+                        var errText = line.substring(app.kErrPrefix.length).replace(/^\s+/, "")
                         app.publishError(errText)
                         acc = acc.concat(line)
                         continue
@@ -277,24 +316,25 @@ ApplicationWindow {
                     // Рассуждения модели ([[think]]) — при настройке «показывать
                     // мышление» Rust присылает их строкой перед ответом; если
                     // отключено — просто не показываем.
-                    if (bodyTmp.substring(0, 8) === "[[think]]" && !app.showReasoning)
+                    if (app.lineIs(bodyTmp, app.kThinkTag) && !app.showReasoning)
                         continue
 
                     // Терминальный результат распознавания — снимаем лоадер.
-                    if (line.substring(0, 7) === "[[stt]]"
-                        || line.indexOf("[голос] ошибка") === 0
-                        || line.indexOf("[голос] распознано пусто") === 0
-                        || line.indexOf("[голос] модель не скачана") === 0)
+                    if (app.lineIs(line, app.kSttTag)
+                        || app.lineIs(line, app.kVoicePrefix + " ошибка")
+                        || app.lineIs(line, app.kVoicePrefix + " распознано пусто")
+                        || app.lineIs(line, app.kVoicePrefix + " модель не скачана"))
                         app.recognizing = false
 
                     // Распознанное (STT): в инпут или сразу агенту — по настройкам.
-                    if (line.substring(0, 7) === "[[stt]]") {
-                        var text = line.substring(7).replace(/^\s+/, "")
+                    if (app.lineIs(line, app.kSttTag)) {
+                        var text = line.substring(app.kSttTag.length).replace(/^\s+/, "")
                         if (text !== "") {
                             if (app.inputMode === "voice" || app.sendImmediately) {
                                 // Баббл в acc: после цикла идёт app.messages = acc,
                                 // иначе добавленный send() баббл затёрся бы.
-                                acc = acc.concat("[[t:" + Date.now() + "]]>>> " + text)
+                                acc = acc.concat(app.kTsOpen + Date.now() + app.kTsClose
+                                                + app.kUserPrefix + text)
                                 bridge.send_prompt(text)
                             } else {
                                 app.dictated(text)
@@ -304,9 +344,9 @@ ApplicationWindow {
                     }
 
                     // Синтез озвучки готов: файл в стопку очереди, в ленту не добавляем.
-                    if (line.substring(0, 7) === "[[tts]]") {
+                    if (app.lineIs(line, app.kTtsTag)) {
                         app.recognizing = false
-                        var ttsPath = line.substring(7).replace(/^\s+/, "")
+                        var ttsPath = line.substring(app.kTtsTag.length).replace(/^\s+/, "")
                         if (ttsPath !== "")
                             app.ttsEnqueue(ttsPath)
                         continue
@@ -315,8 +355,8 @@ ApplicationWindow {
                     // Запоминаем последний ответ агента — к нему привязываем
                     // автосинтезированные WAV (идут после текста). Строчки
                     // пользователя и рассуждения не считаем ответом.
-                    if (bodyTmp !== "" && bodyTmp.substring(0, 4) !== ">>> "
-                        && bodyTmp.substring(0, 8) !== "[[think]]")
+                    if (bodyTmp !== "" && !app.lineIs(bodyTmp, app.kUserPrefix)
+                        && !app.lineIs(bodyTmp, app.kThinkTag))
                         app.pendingTtsBody = bodyTmp.replace(/^\n+/, "")
 
                     acc = acc.concat(line)
@@ -364,11 +404,13 @@ ApplicationWindow {
         var cid = bridge.current_session_id()
         if (cid !== undefined && cid !== null && cid !== app.currentSessionId) {
             app.currentSessionId = cid
-            // Новая сессия активирована — применяем выбранный в настройках
-            // режим чата (Build/Plan), если ещё не применяли к этой сессии.
-            if (cid !== "" && cid !== app.chatModeAppliedSession) {
-                app.chatModeAppliedSession = cid
-                bridge.set_mode(cid, app.chatMode)
+            // Новая сессия активирована — применяем сохранённый за ней режим
+            // (Build/Plan), если он есть; сессии без сохранённого выбора живут
+            // в режиме сервера по умолчанию.
+            if (cid !== "" && cid in app.sessionModes
+                    && !(cid in app.sessionModesApplied)) {
+                app.sessionModesApplied[cid] = true
+                bridge.set_mode(cid, app.sessionModes[cid])
             }
         }
         var nav = bridge.take_nav()
@@ -440,9 +482,30 @@ ApplicationWindow {
         if (t === "")
             return
         var acc = app.messages
-        acc = acc.concat("[[t:" + Date.now() + "]]>>> " + t)
+        acc = acc.concat(app.kTsOpen + Date.now() + app.kTsClose
+                        + app.kUserPrefix + t)
         app.messages = acc
         bridge.send_prompt(t)
+    }
+
+    // Режим сессии (агент build/plan) — свойство конкретной сессии. Выбор
+    // запоминается за сессией в sessionModes и применяется при её открытии
+    // (в poll()) или сразу, если сессия активна.
+    function sessionMode(sid) {
+        if (sid && sid in app.sessionModes && app.sessionModes[sid])
+            return app.sessionModes[sid]
+        return "build"
+    }
+    function setSessionMode(sid, mode) {
+        if (!sid || (mode !== "build" && mode !== "plan"))
+            return
+        app.sessionModes[sid] = mode
+        sessionModesSetting.value = JSON.stringify(app.sessionModes)
+        sessionModesSetting.sync()
+        if (sid === app.currentSessionId) {
+            app.sessionModesApplied[sid] = true
+            bridge.set_mode(sid, mode)
+        }
     }
 
     function clearHistory() { app.messages = [] }
@@ -544,20 +607,6 @@ ApplicationWindow {
         app.showReasoning = !!v
         showReasoningSetting.value = app.showReasoning
         showReasoningSetting.sync()
-    }
-
-    function setChatMode(v) {
-        if (v !== "build" && v !== "plan")
-            return
-        app.chatMode = v
-        chatModeSetting.value = app.chatMode
-        chatModeSetting.sync()
-        // Применяем сразу к текущей сессии; при смене сессии режим
-        // переприменится в poll() (см. chatModeAppliedSession).
-        if (app.currentSessionId !== "") {
-            app.chatModeAppliedSession = app.currentSessionId
-            bridge.set_mode(app.currentSessionId, app.chatMode)
-        }
     }
 
     onInputModeChanged: { inputModeSetting.value = app.inputMode; inputModeSetting.sync() }

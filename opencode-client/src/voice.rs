@@ -3,6 +3,7 @@
 //! озвучка (piper). Всё локально, пользователь сам выбирает и качает модели.
 
 use crate::cmd::Cmd;
+use crate::markers::*;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -614,9 +615,9 @@ log::error!("models dir: {e}");
             let state = d.state;
             if let Ok(mut q) = pending.lock() {
                 if state == Phase::Done {
-                    q.push(format!("[голос] «{name}» скачана"));
+                    q.push(format!("{VOICE_PREFIX} «{name}» скачана"));
                 } else {
-                    q.push(format!("[голос] ошибка скачивания «{name}»"));
+                    q.push(format!("{VOICE_PREFIX} ошибка скачивания «{name}»"));
                 }
             }
         }
@@ -629,7 +630,7 @@ pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec
     let id = voice.stt_model.lock().map(|g| g.clone()).unwrap_or_default();
     if id.is_empty() {
         if let Ok(mut q) = pending.lock() {
-            q.push("[голос] сначала выберите STT-модель в настройках".to_string());
+            q.push(format!("{VOICE_PREFIX} сначала выберите STT-модель в настройках"));
         }
         return;
     }
@@ -645,7 +646,7 @@ pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec
     };
     if !model_file.exists() {
         if let Ok(mut q) = pending.lock() {
-            q.push("[голос] модель не скачана: скачайте её в настройках".to_string());
+            q.push(format!("{VOICE_PREFIX} модель не скачана: скачайте её в настройках"));
         }
         return;
     }
@@ -664,7 +665,7 @@ pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
     log::info!("STT: audio_ctx={audio_ctx} threads={threads}");
     if let Ok(mut q) = pending.lock() {
-        q.push("[голос] распознаю…".to_string());
+        q.push(format!("{VOICE_PREFIX} распознаю…"));
     }
 
     let out = match tokio::process::Command::new(WHISPER_BIN)
@@ -681,7 +682,7 @@ pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec
         Err(e) => {
             log::error!("whisper-cli не запустился: {e}");
             if let Ok(mut q) = pending.lock() {
-                q.push(format!("[голос] ошибка запуска STT: {e}"));
+                q.push(format!("{VOICE_PREFIX} ошибка запуска STT: {e}"));
             }
             return;
         }
@@ -689,19 +690,19 @@ pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec
     if !out.status.success() {
         log::error!("whisper-cli: {}", String::from_utf8_lossy(&out.stderr));
         if let Ok(mut q) = pending.lock() {
-            q.push("[голос] ошибка распознавания (см. лог)".to_string());
+            q.push(format!("{VOICE_PREFIX} ошибка распознавания (см. лог)"));
         }
         return;
     }
     let txt = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if txt.is_empty() {
         if let Ok(mut q) = pending.lock() {
-            q.push("[голос] распознано пусто".to_string());
+            q.push(format!("{VOICE_PREFIX} распознано пусто"));
         }
         return;
     }
     if let Ok(mut q) = pending.lock() {
-        q.push(format!("[[stt]] {txt}"));
+        q.push(format!("{STT_TAG} {txt}"));
     }
 }
 
@@ -833,7 +834,7 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     let id = voice.tts_model.lock().map(|g| g.clone()).unwrap_or_default();
     if id.is_empty() {
         if let Ok(mut q) = pending.lock() {
-            q.push("[голос] сначала выберите TTS-модель в настройках".to_string());
+            q.push(format!("{VOICE_PREFIX} сначала выберите TTS-модель в настройках"));
         }
         return;
     }
@@ -846,13 +847,13 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     };
     let Some((onnx, config)) = piper_files(model) else {
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("[голос] модель «{id}» не скачана: скачайте её в настройках"));
+            q.push(format!("{VOICE_PREFIX} модель «{id}» не скачана: скачайте её в настройках"));
         }
         return;
     };
     if !std::path::Path::new(PIPER_BIN).exists() {
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("[голос] piper не установлен ({PIPER_BIN})"));
+            q.push(format!("{VOICE_PREFIX} piper не установлен ({PIPER_BIN})"));
         }
         return;
     }
@@ -888,7 +889,7 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         Err(e) => {
             log::error!("piper не запустился: {e}");
             if let Ok(mut q) = pending.lock() {
-                q.push(format!("[голос] ошибка запуска TTS: {e}"));
+                q.push(format!("{VOICE_PREFIX} ошибка запуска TTS: {e}"));
             }
             return;
         }
@@ -906,7 +907,7 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     if !out.status.success() {
         log::error!("piper: {}", String::from_utf8_lossy(&out.stderr));
         if let Ok(mut q) = pending.lock() {
-            q.push("[голос] ошибка синтеза (см. лог)".to_string());
+            q.push(format!("{VOICE_PREFIX} ошибка синтеза (см. лог)"));
         }
         return;
     }
@@ -919,7 +920,7 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     }
     log::info!("TTS: синтез готов, WAV в {out_wav}");
     if let Ok(mut q) = pending.lock() {
-        q.push(format!("[[tts]]{out_wav}"));
+        q.push(format!("{TTS_TAG}{out_wav}"));
     }
 }
 
@@ -1006,7 +1007,7 @@ pub async fn run_command(
                     .and_then(|x| x["name"].as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| id.clone());
                 if let Ok(mut q) = pending.lock() {
-                    q.push(format!("[голос] скачивание «{name}»…"));
+                    q.push(format!("{VOICE_PREFIX} скачивание «{name}»…"));
                 }
                 tokio::spawn(async move {
                     download_model(&voice2, &id, &cat, &pending2).await;
@@ -1042,8 +1043,8 @@ pub async fn run_command(
                         *g = repl.clone().unwrap_or_default();
                     }
                     note = Some(match repl {
-                        Some(r) => format!("[голос] выбрана STT-модель {r}"),
-                        None => "[голос] STT-моделей нет — скачайте новую".to_string(),
+                        Some(r) => format!("{VOICE_PREFIX} выбрана STT-модель {r}"),
+                        None => format!("{VOICE_PREFIX} STT-моделей нет — скачайте новую"),
                     });
                 }
                 if cur2 == id {
@@ -1052,8 +1053,8 @@ pub async fn run_command(
                         *g = repl.clone().unwrap_or_default();
                     }
                     note = match repl {
-                        Some(r) => Some(format!("[голос] выбрана TTS-модель {r}")),
-                        None => Some("[голос] TTS-моделей нет — скачайте новую".to_string()),
+                        Some(r) => Some(format!("{VOICE_PREFIX} выбрана TTS-модель {r}")),
+                        None => Some(format!("{VOICE_PREFIX} TTS-моделей нет — скачайте новую")),
                     };
                 }
                 if let (Some(n), Ok(mut q)) = (note, pending.lock()) {
@@ -1068,7 +1069,7 @@ pub async fn run_command(
             stop_recording(voice).await;
             // подтверждаем завершение слушания коротким beep-сообщением
             if let Ok(mut q) = pending.lock() {
-                q.push("[голос] запись завершена".to_string())
+                q.push(format!("{VOICE_PREFIX} запись завершена"))
             }
             stt_from_call(voice, pending).await;
         }
@@ -1111,14 +1112,14 @@ pub async fn run_command(
                     v.refresh_status();
                     if let Ok(mut q) = pendant.lock() {
                         q.push(format!(
-                            "[голос] каталог моделей обновлён: моделей подходит {count}"
+                            "{VOICE_PREFIX} каталог моделей обновлён: моделей подходит {count}"
                         ));
                     }
                 }
                 Err(e) => {
                     log::error!("обновление каталога: {e}");
                     if let Ok(mut q) = pendant.lock() {
-                        q.push(format!("[голос] каталог не обновился: {e}"));
+                        q.push(format!("{VOICE_PREFIX} каталог не обновился: {e}"));
                     }
                 }
             }

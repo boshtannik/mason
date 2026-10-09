@@ -95,6 +95,30 @@ Item {
 
             SectionHeader { text: qsTr("Session") }
 
+            // Режим (агент) этой сессии: build — активная работа, plan —
+            // планирование. Персональный для каждой сессии; выбор сохраняется
+            // в dconf реестре (см. sessionMode/setSessionMode в корне QML).
+            ComboBox {
+                id: modeCombo
+                width: parent.width
+                label: qsTr("Working mode")
+                description: qsTr("Server agent used by this session")
+                menu: ContextMenu {
+                    MenuItem { text: qsTr("Build — active work") }
+                    MenuItem { text: qsTr("Plan — planning") }
+                }
+                Binding {
+                    target: modeCombo
+                    property: "currentIndex"
+                    value: appWindow.sessionMode(sessionSettingsPage.sessionId) === "plan" ? 1 : 0
+                }
+                onCurrentIndexChanged: {
+                    var v = modeCombo.currentIndex === 1 ? "plan" : "build"
+                    if (v !== appWindow.sessionMode(sessionSettingsPage.sessionId))
+                        appWindow.setSessionMode(sessionSettingsPage.sessionId, v)
+                }
+            }
+
             BackgroundItem {
                 width: parent.width
                 contentHeight: Theme.itemSizeSmall

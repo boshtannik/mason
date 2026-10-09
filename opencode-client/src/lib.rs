@@ -6,6 +6,7 @@ pub mod audio;
 pub mod bridge;
 pub mod cmd;
 pub mod event;
+pub mod markers;
 pub mod server;
 pub mod state;
 pub mod types;
