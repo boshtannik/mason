@@ -29,11 +29,35 @@ Item {
             .replace(/>/g, "&gt;")
     }
 
+    // HTML-escape a plain text/URL for insertion into a RichText string.
+    function htmlEsc(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+    }
+
     // Inline markup of a single line (after escaping, no newlines).
     function mdInline(s) {
-        // [text](url "title") → link; code; bold; italic (*…* and _…_).
+        // 1. Markdown links [text](url) → placeholders, so the bare-URL
+        // detector (step 2) cannot re-wrap the same URL inside an href.
+        var ml = []
         s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g,
-                      '<a href="$2" color="#82c4ff">$1</a>')
+            function (m, t, u) {
+                ml.push([t, u])
+                return "\u0000" + (ml.length - 1) + "\u0000"
+            })
+        // 2. Bare web URLs inside a paragraph → clickable links (trailing
+        // punctuation stays outside the link).
+        s = s.replace(/(^|[\s(])(https?:\/\/[\w\-+~!$&'()*,;=:%@\/.?#[\]\\]+)(?=[\s<)]|$)/g,
+            function (m, p, u) {
+                return p + '<a href="' + htmlEsc(u) + '" color="#82c4ff">'
+                       + htmlEsc(u) + '</a>'
+            })
+        // 3. Restore markdown links.
+        s = s.replace(/\u0000(\d+)\u0000/g, function (m, n) {
+            return '<a href="' + htmlEsc(ml[+n][1]) + '" color="#82c4ff">'
+                   + htmlEsc(ml[+n][0]) + '</a>'
+        })
+        // Code; bold; italic (*…* and _…_).
         s = s.replace(/`([^`]+)`/g, "<font face='monospace' color='#e0e0e0'>$1</font>")
         s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
         s = s.replace(/(^|[\s(])_([^_]+)_(?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
@@ -351,35 +375,16 @@ Item {
                     b = b.substring(appWindow.kErrTag.length)
                 if (line.isSvc)
                     b = b.substring(appWindow.kSvcTag.length)
-                return b.replace(/^\n+/, "")
+                b = b.replace(/^\n+/, "")
+                if (b.length > appWindow.kFeedBodyCap)
+                    b = b.substring(0, appWindow.kFeedBodyCap) + "\n… [text truncated]"
+                return b
             }
             // The body split into display segments: prose, fenced-code blocks
             // and whole-line links — so copy buttons can sit next to each block.
             // `{code, link, text, url, lang}` (see chatPage.splitBody).
             property var segments: chatPage.splitBody(line.body)
             readonly property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
-            // Width of the bottom line: time + (copy and, for the agent, TTS) buttons + padding.
-            readonly property real footW: {
-                var w = tsLabel.implicitWidth
-                if (!line.isUser && !line.isSystem && line.tsMs !== "") {
-                    // copy (always on agent/thinking lines)
-                    w += Theme.itemSizeMedium + Theme.paddingSmall
-                    // speak (only when TTS is available)
-                    if (appWindow.ttsModelReady && appWindow.ttsMode !== "off")
-                        w += Theme.itemSizeMedium + Theme.paddingSmall
-                }
-                return w
-            }
-
-            // Hidden measuring label: keeps the bubble width in line with the
-            // old single-label layout (natural width of the whole body).
-            Label {
-                id: measLabel
-                visible: false
-                width: line.maxW - 2 * Theme.paddingSmall
-                text: line.body
-                font.pixelSize: Theme.fontSizeSmall
-            }
 
             Rectangle {
                 id: bubble
@@ -393,10 +398,7 @@ Item {
                              : (line.isSvc
                                 ? Theme.rgba(Theme.secondaryColor, 0.10)
                                 : Theme.rgba(Theme.primaryColor, 0.12))))
-                width: Math.min(line.maxW,
-                                Math.max(measLabel.implicitWidth,
-                                         line.footW + 2 * Theme.paddingSmall)
-                                + 2 * Theme.paddingSmall)
+                width: line.maxW
                 height: bodyCol.height
                         + (footRow.height > 0 ? footRow.height + Theme.paddingSmall : 0)
                         + 2 * Theme.paddingSmall
@@ -439,18 +441,23 @@ Item {
 
                             // A whole-line link: the URL itself + a copy button
                             // right beside it.
-                            Row {
+                            // Whole-line link: label + copy button. The button is pinned to the row's
+                            // right edge and the label is cut off at the icon's edge —
+                            // the icon can never sit ON the text.
+                            Item {
                                 id: linkRow
                                 visible: segItem.seg.link
                                 width: parent.width
                                 height: Math.max(urlLbl.height, copyLinkBtn.height)
-                                spacing: Theme.paddingSmall
                                 Label {
                                     id: urlLbl
-                                    width: parent.width - copyLinkBtn.width - parent.spacing
+                                    anchors.left: parent.left
+                                    anchors.right: copyLinkBtn.left
+                                    anchors.rightMargin: Theme.paddingSmall
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: segItem.seg.url
+                                    text: segItem.seg.text || segItem.seg.url
                                     wrapMode: Text.Wrap
+                                    clip: true
                                     font.pixelSize: Theme.fontSizeSmall
                                     font.family: "monospace"
                                     color: Theme.highlightColor
@@ -465,6 +472,7 @@ Item {
                                     id: copyLinkBtn
                                     width: Theme.itemSizeSmall
                                     height: Theme.itemSizeSmall
+                                    anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     icon.source: "image://theme/icon-m-clipboard"
                                     onClicked: appWindow.copyText(segItem.seg.url)

@@ -54,6 +54,7 @@ fn init_logging() {
     if let Some(home) = std::env::var_os("HOME") {
         let dir = std::path::PathBuf::from(home).join(".cache/harbour-opencode");
         let _ = std::fs::create_dir_all(&dir);
+        install_panic_log(&dir);
         let path = dir.join("app.log");
         if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
             builder.target(env_logger::Target::Pipe(Box::new(Tee(file))));
@@ -61,6 +62,31 @@ fn init_logging() {
     }
     let _ = builder.try_init();
     log::info!("--- harbour-opencode starting (pid={}) ---", std::process::id());
+}
+
+/// Routed to the file — the launcher does not capture the app's stderr, so a
+/// panic from the icon launch would otherwise be lost. Writes the payload and
+/// a symbolicated backtrace to `panic.log` in the app cache.
+fn install_panic_log(dir: &std::path::Path) {
+    let path = dir.join("panic.log");
+    std::panic::set_hook(Box::new(move |info| {
+        let bt = std::backtrace::Backtrace::force_capture();
+        let msg = format!("\n[{} PANIC] thread={:?}\n{}\n{}",
+                          humantime_since_epoch(), std::thread::current().id(), info, bt);
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = f.write_all(msg.as_bytes());
+            let _ = f.flush();
+        }
+        // If the app was started from a terminal, keep the visible output too.
+        let _ = std::io::stderr().write_all(msg.as_bytes());
+    }));
+}
+
+fn humantime_since_epoch() -> String {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => format!("{}s", d.as_secs()),
+        Err(e) => format!("{e:?}"),
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -92,6 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let permissions = bridge_pinned.borrow().permissions_handle();
     let questions = bridge_pinned.borrow().questions_handle();
     let settings = bridge_pinned.borrow().settings_handle();
+    let gui_mark = bridge_pinned.borrow().gui_mark_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
@@ -180,6 +207,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         })
         .expect("spawn worker");
+
+    // Diagnostics: every 4s dump where the QML poll() is right now, so a stall
+    // of the main thread is pin-pointed to a single phase (pure std thread).
+    {
+        let gui_mark = gui_mark.clone();
+        std::thread::Builder::new()
+            .name("gui-mark-dump".into())
+            .spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(4));
+                let (s, age_s) = {
+                    let g = gui_mark.lock();
+                    match g {
+                        Ok(g) => (g.s.clone(), now_ms().saturating_sub(g.t) / 1000),
+                        Err(_) => (String::from("<poisoned>"), 0),
+                    }
+                };
+                log::info!("GUI-MARK [{s}] age={age_s}s");
+            })
+            .ok();
+    }
 
     if url_rx.recv_timeout(SERVER_WAIT).ok().flatten().is_none() {
         log::warn!("serve not ready within {:?} — starting in offline mode", SERVER_WAIT);

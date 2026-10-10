@@ -6,6 +6,14 @@ use crate::i18n::{err_line, now_ms};
 use crate::settings::Settings;
 use crate::types::event::PermissionReplyKind;
 
+/// Diagnostic marker written by the QML main thread: which poll() phase is
+/// running right now. `t` is `now_ms()` at the moment of the last write.
+#[derive(Default, Clone)]
+pub struct GuiMark {
+    pub s: String,
+    pub t: u64,
+}
+
 /// Bridge Rust-core ←→ QML.
 ///
 /// Threads: the QML engine lives in the main thread and calls the `drain_messages`
@@ -67,6 +75,9 @@ pub struct AppBridge {
     /// JSON settings status (directory handling, etc.), written by the worker/backend.
     #[allow(dead_code)]
     settings_shared: Arc<Mutex<String>>,
+    /// QML poll() progress marker (diagnostics), written by the main thread.
+    #[allow(dead_code)]
+    gui_mark_shared: Arc<Mutex<GuiMark>>,
 
     /// QML: take and clear accumulated messages (polling).
     /// We separate elements with the Record Separator control character (`\x1e`), not
@@ -89,6 +100,13 @@ pub struct AppBridge {
             if let Ok(mut q) = self.outgoing_prompts.lock() {
                 q.push(t);
             }
+        }
+    }),
+    /// QML: record where poll() is right now (diagnostics for GUI stalls).
+    gui_mark: qt_method!(fn gui_mark(&self, m: QString) {
+        if let Ok(mut g) = self.gui_mark_shared.lock() {
+            g.s = m.to_string();
+            g.t = now_ms();
         }
     }),
     /// QML: current status (read-only, updated by the worker).
@@ -479,6 +497,11 @@ impl AppBridge {
     /// Settings handle for the worker.
     pub fn settings_handle(&self) -> Arc<Mutex<String>> {
         self.settings_shared.clone()
+    }
+
+    /// Diagnostic GUI-mark handle for the dumper thread in main().
+    pub fn gui_mark_handle(&self) -> Arc<Mutex<GuiMark>> {
+        self.gui_mark_shared.clone()
     }
 
     /// Push a JSON command onto the queue for the worker.

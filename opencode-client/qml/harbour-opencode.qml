@@ -65,6 +65,9 @@ ApplicationWindow {
     // never sends them). kErrTag — error (red), kSvcTag — service notice.
     readonly property string kErrTag: "[[e]]"
     readonly property string kSvcTag: "[[s]]"
+    // Safety cap for a single feed bubble (display): a bloated single answer
+    // must not wedge the main thread's rich-text layout on every feed rebuild.
+    readonly property int kFeedBodyCap: 60000
     // Escape regex special characters (built from the marker constants).
     function reEscape(s) {
         return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -368,7 +371,35 @@ ApplicationWindow {
         app.voiceCmd(app.cmdTts, text)
     }
 
+    // Rebuild the feed ONLY when something actually changed: a plain
+    // `app.messages = acc` swaps the array and forces the ListView to
+    // destroy/recreate every delegate (markdown→HTML + rich-text layout)
+    // even for the same lines, on every 300 ms poll. Returns true if the
+    // model array was replaced. `mutated` is set when a limb was edited
+    // in place (live [[think]] bubble) — same array, but the feed MUST
+    // refresh, so we hand the view a fresh copy.
+    function applyFeed(acc, mutated) {
+        if (mutated) {
+            app.messages = acc.slice()
+            return true
+        }
+        var cur = app.messages
+        if (cur.length === acc.length) {
+            var same = true
+            for (var fi = 0; fi < acc.length; fi++)
+                if (cur[fi] !== acc[fi]) {
+                    same = false
+                    break
+                }
+            if (same)
+                return false
+        }
+        app.messages = acc
+        return true
+    }
+
     function poll() {
+        bridge.gui_mark("start")
         var st = bridge.status_text()
         if (st !== undefined && st !== "")
             app.statusText = st
@@ -380,8 +411,10 @@ ApplicationWindow {
         }
         var msgs = bridge.drain_messages()
         if (msgs !== "" && msgs !== undefined) {
+            bridge.gui_mark("feed-parse")
             var lines = msgs.split("\u001e")
             var acc = app.messages
+            var accMutated = false
             for (var i = 0; i < lines.length; i++) {
                 var line = lines[i]
                 if (line !== "") {
@@ -441,6 +474,7 @@ ApplicationWindow {
                                        ? prevBody.substring(app.kThinkTag.length) : null
                         if (prevText !== null && rText.indexOf(prevText) === 0) {
                             acc[acc.length - 1] = rLine
+                            accMutated = true
                         } else {
                             acc = acc.concat(rLine)
                         }
@@ -496,8 +530,16 @@ ApplicationWindow {
                     acc = acc.concat(line)
                 }
             }
-            app.messages = acc
+            var accMax = 0
+            for (var ai = 0; ai < acc.length; ai++)
+                if (acc[ai].length > accMax) accMax = acc[ai].length
+bridge.gui_mark("feed n=" + acc.length + " max=" + accMax)
+                if (app.applyFeed(acc, accMutated))
+                bridge.gui_mark("feed-applied")
+            else
+                bridge.gui_mark("feed-same")
         }
+        bridge.gui_mark("sessions")
         var sess = bridge.sessions_json()
         if (sess !== "" && sess !== undefined) {
             try {
@@ -506,6 +548,7 @@ ApplicationWindow {
                 console.log("sessions parse error: " + e)
             }
         }
+        bridge.gui_mark("todos")
         var t = bridge.todo_json()
         if (t !== "" && t !== undefined) {
             try {
@@ -514,6 +557,7 @@ ApplicationWindow {
                 console.log("todo parse error: " + e)
             }
         }
+        bridge.gui_mark("models")
         var md = bridge.models_json()
         if (md !== "" && md !== undefined) {
             try {
@@ -522,6 +566,7 @@ ApplicationWindow {
                 console.log("models parse error: " + e)
             }
         }
+        bridge.gui_mark("sounds")
         if (app.sounds.length === 0) {
             var snd = bridge.sounds_json()
             if (snd !== "" && snd !== undefined) {
@@ -535,6 +580,7 @@ ApplicationWindow {
                 }
             }
         }
+        bridge.gui_mark("cid")
         var cid = bridge.current_session_id()
         if (cid !== undefined && cid !== null && cid !== app.currentSessionId) {
             app.currentSessionId = cid
@@ -547,9 +593,11 @@ ApplicationWindow {
                 bridge.set_mode(cid, app.sessionModes[cid])
             }
         }
+        bridge.gui_mark("nav")
         var nav = bridge.take_nav()
         if (nav !== undefined && nav >= 0)
             app.requestPage(nav)
+        bridge.gui_mark("voice")
         var v = bridge.voice_status_json()
         if (v !== "" && v !== undefined) {
             try {
@@ -567,6 +615,7 @@ ApplicationWindow {
                 console.log("voice parse error: " + e)
             }
         }
+        bridge.gui_mark("perms")
         var pj = bridge.permissions_json()
         if (pj !== "" && pj !== undefined) {
             try {
@@ -589,6 +638,7 @@ ApplicationWindow {
                 console.log("permissions parse error: " + e)
             }
         }
+        bridge.gui_mark("questions")
         var qj = bridge.questions_json()
         if (qj !== "" && qj !== undefined) {
             try {
@@ -611,6 +661,7 @@ ApplicationWindow {
                 console.log("questions parse error: " + e)
             }
         }
+        bridge.gui_mark("settings")
         var sj = bridge.settings_json()
         if (sj !== "" && sj !== undefined) {
             try {
@@ -621,6 +672,7 @@ ApplicationWindow {
                 console.log("settings parse error: " + e)
             }
         }
+        bridge.gui_mark("end")
     }
 
     function statusColor(s) {
