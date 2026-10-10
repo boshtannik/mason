@@ -10,6 +10,19 @@ and approve tool calls, stream assistant output, and use local voice input/outpu
 
 Built and tested on a Sony Xperia 10 IV running Sailfish OS 5.1.0.11 (aarch64).
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="screenshots/photo_1_2026-10-10_03-53-37.jpg" width="240" alt="mason screenshot 1"></td>
+    <td align="center"><img src="screenshots/photo_2_2026-10-10_03-53-37.jpg" width="240" alt="mason screenshot 2"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="screenshots/photo_3_2026-10-10_03-53-37.jpg" width="240" alt="mason screenshot 3"></td>
+    <td align="center"><img src="screenshots/photo_4_2026-10-10_03-53-37.jpg" width="240" alt="mason screenshot 4"></td>
+  </tr>
+</table>
+
 ## How it works
 
 `mason` runs the opencode agent **entirely in your pocket**. The thinking happens in
