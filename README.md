@@ -76,6 +76,21 @@ A secondary, future mode is using the same client as a thin console for an
   in `opencode-client/assets/models.json`.
 - Localization: Russian, Finnish, German, Ukrainian (`opencode-client/translations`).
 
+## Languages
+
+The UI is fully localized (100% of strings translated):
+
+| Language | Code | Status |
+| --- | --- | --- |
+| English | `en` | source / default |
+| Русский | `ru` | complete |
+| Suomi (Finnish) | `fi` | complete |
+| Deutsch (German) | `de` | complete |
+| Українська | `uk` | complete |
+
+Translations live in `opencode-client/translations/` as `.ts` and are compiled
+to `.qm` during the RPM build (see `rpm/harbour-opencode.spec`).
+
 ## Project layout
 
 ```
