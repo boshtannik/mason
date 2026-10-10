@@ -1,6 +1,6 @@
 use crate::types::session::SessionStatus;
 
-/// FSM сессии: idle -> busy -> (retry | idle).
+/// Session FSM: idle -> busy -> (retry | idle).
 #[derive(Debug, Default)]
 pub struct SessionFsm {
     pub status: SessionStatus,

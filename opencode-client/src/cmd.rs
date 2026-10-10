@@ -1,11 +1,11 @@
-//! Единый источник строк команд протокола QML <-> воркер.
+//! Single source of QML <-> worker protocol command strings.
 //!
-//! Значения — snake_case варианты (serde), поэтому мост и воркер связаны
-//! компилятором: опечатка в строке протокола не пройдёт незамеченной.
+//! Values are snake_case variants (serde), so the bridge and the worker are tied
+//! together by the compiler: a typo in a protocol string won't go unnoticed.
 
 use serde::{Deserialize, Serialize};
 
-/// Команды, которые QML отправляет воркеру через JSON `{"cmd": ..., ...}`.
+/// Commands that QML sends to the worker via JSON `{"cmd": ..., ...}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Cmd {
@@ -16,16 +16,16 @@ pub enum Cmd {
     DeleteAll,
     Fork,
     Permission,
-    /// Установить рабочую директорию для opencode serve (cwd).
+    /// Set the working directory for opencode serve (cwd).
     #[serde(rename = "set_workdir")]
     SetWorkdir,
-    /// Запросить текущие настройки (воркер обновит shared).
+    /// Request current settings (the worker refreshes shared).
     #[serde(rename = "get_settings")]
     GetSettings,
-    /// Сохранить настройки (рабочая директория и т.п.)
+    /// Save settings (working directory etc.)
     #[serde(rename = "save_settings")]
     SaveSettings,
-    /// Dev-only (см. `bridge/mock_permission`): в релиз-сборке варианта нет.
+    /// Dev-only (see `bridge/mock_permission`): the variant is absent in release builds.
     #[cfg(debug_assertions)]
     MockPermission,
     Share,
@@ -33,7 +33,7 @@ pub enum Cmd {
     Summarize,
     Abort,
     SetModel,
-    /// Переключить агента/режим сессии: Build | Plan.
+    /// Switch the session agent/mode: Build | Plan.
     SetMode,
     VoiceLang,
     VoiceSelectStt,
@@ -51,7 +51,7 @@ pub enum Cmd {
 }
 
 impl Cmd {
-    /// Голосовые команды (обрабатывает `voice::run_command`).
+    /// Voice commands (handled by `voice::run_command`).
     pub fn is_voice(self) -> bool {
         matches!(
             self,

@@ -8,7 +8,7 @@ use crate::state::tool::ToolStore;
 use crate::types::event::Event;
 use crate::types::permission::Permission;
 
-/// Применяет событие к состоянию. Возвращает bool — «состояние изменилось» (перерисовать UI).
+/// Applies an event to the state. Returns bool — "state changed" (redraw the UI).
 pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
     match event {
         Event::SessionStatus { properties } => {
@@ -38,7 +38,7 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
             true
         }
         Event::PermissionAsked { properties } => {
-            // Legacy permission.asked → та же модель Permission.
+            // Legacy permission.asked → the same Permission model.
             let perm = Permission {
                 id: properties.id.clone(),
                 sessionID: properties.sessionID.clone(),
@@ -79,7 +79,7 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
             state.sessions.remove(&properties.info.id);
             true
         }
-        // Прочие события пока не меняют состояние — перечислены исчерпывающе.
+        // Other events don't change state yet — listed exhaustively.
         Event::ModelsDevRefreshed { .. }
         | Event::IntegrationUpdated { .. }
         | Event::IntegrationConnectionUpdated { .. }

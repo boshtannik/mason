@@ -23,7 +23,7 @@ Item {
                                 ? (session.providerID + " / " + session.modelID)
                                 : qsTr("no data")
 
-    // Защита от двойного тапа (действие выполняется ~секунду).
+    // Protection against a double tap (the action takes ~a second).
     property bool actionBusy: false
     Timer {
         id: actionGuard
@@ -95,9 +95,9 @@ Item {
 
             SectionHeader { text: qsTr("Session") }
 
-            // Режим (агент) этой сессии: build — активная работа, plan —
-            // планирование. Персональный для каждой сессии; выбор сохраняется
-            // в dconf реестре (см. sessionMode/setSessionMode в корне QML).
+            // This session's mode (agent): build — active work, plan —
+            // planning. Per-session; the choice is saved
+            // in the dconf registry (see sessionMode/setSessionMode in the root QML).
             ComboBox {
                 id: modeCombo
                 width: parent.width
@@ -244,7 +244,7 @@ Item {
             BackgroundItem {
                 width: parent.width
                 contentHeight: Theme.itemSizeSmall
-                visible: appWindow.statusText === "busy"
+                visible: appWindow.statusBase(appWindow.statusText) === "busy"
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter

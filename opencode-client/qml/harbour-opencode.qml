@@ -19,7 +19,7 @@ ApplicationWindow {
     property string currentSessionId: ""
     property bool showTools: showToolsSetting.value !== undefined
                             ? showToolsSetting.value : true
-    // True только в debug-сборке: включает кнопки моков (ошибки/пермишны).
+    // True only in a debug build: enables the mock buttons (errors/permissions).
     readonly property bool devTools: bridge !== undefined
                                      && bridge.dev_tools()
     property string pttPosition: pttPositionSetting.value !== undefined
@@ -32,95 +32,122 @@ ApplicationWindow {
                                      ? soundOnPermissionSetting.value : true
     property bool sendImmediately: sendImmediatelySetting.value !== undefined
                                    ? sendImmediatelySetting.value : false
-    // ── Маркеры протокола «воркер ↔ QML» ───────────────────────────────────────
-    // Зеркало opencode-client/src/markers.rs. Оба файла менять синхронно:
-    // условия сравнивают через эти константы, а не через сырые строки —
-    // это убирает класс багов с неверной длиной префикса (был substring(0,8)
-    // против 9-символьного [[think]]).
+    // ── Worker ↔ QML protocol markers ─────────────────────────────────────────
+    // Mirror of opencode-client/src/markers.rs. Change both files in sync:
+    // conditions compare via these constants, never via raw strings — this
+    // removes a whole class of bugs (there used to be substring(0,8) against
+    // the 9-char [[think]]).
     readonly property string kTsOpen: "[[t:"
     readonly property string kTsClose: "]]"
     readonly property string kThinkTag: "[[think]]"
+    // Live reasoning chunk (`[[thinklive]]<text>`): the worker streams model
+    // reasoning deltas; QML replaces the trailing [[think]] bubble in place.
+    readonly property string kThinkLiveTag: "[[thinklive]]"
     readonly property string kUserPrefix: ">>> "
-    readonly property string kErrPrefix: "[ошибка сервера]"
     readonly property string kSttTag: "[[stt]]"
     readonly property string kTtsTag: "[[tts]]"
-    readonly property string kVoicePrefix: "[голос]"
-    // Экран специальных символов для RegExp (строится из констант маркеров).
+    readonly property string kSttDoneTag: "[[sttdone]]"
+    // i18n tokens (worker sends a translation KEY; QML resolves qsTr): see
+    // opencode-client/src/i18n.rs. `[[s:KEY]]` — service notice,
+    // `[[e:KEY]]` — error (red bubble + notification), args after \u001f.
+    readonly property string kSvcOpen: "[[s:"
+    readonly property string kErrOpen: "[[e:"
+    readonly property string kTagClose: "]]"
+    readonly property string kArgSep: "\u001f"
+    // Bubble markers (built by QML for system styling; the worker itself
+    // never sends them). kErrTag — error (red), kSvcTag — service notice.
+    readonly property string kErrTag: "[[e]]"
+    readonly property string kSvcTag: "[[s]]"
+    // Escape regex special characters (built from the marker constants).
     function reEscape(s) {
         return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     }
-    // Регэксп таймстампа `[[t:<мс>]]` — собирается из констант (markers.rs: proto_line).
-    // Группа 1 — миллисекунды. Условия и срезы через константы, не через сырые строки.
+    // Timestamp regexp `[[t:<ms>]]`, built from the constants (markers.rs:
+    // proto_line). Group 1 — milliseconds. Conditions/slices go through the
+    // constants, never raw strings.
     readonly property var tsRe: new RegExp(
         "^" + reEscape(app.kTsOpen) + "(\\d+)" + reEscape(app.kTsClose))
-    // Регэксп среза префикса ошибки сервера (для отображения текста ошибки).
-    readonly property var errRe: new RegExp(
-        "^" + reEscape(app.kErrPrefix) + "\\s*")
-    // Срезать `[[t:<мс>]]` с начала строки ленты.
+    // Strip `[[t:<ms>]]` from the start of a feed line.
     function stripTs(s) {
         return s.replace(app.tsRe, "")
     }
-    // Строка ленты начинается ровно с метки-префикса (исключая таймстамп).
+    // Feed line starts exactly with the marker-prefix (timestamp excluded).
     function lineIs(line, tag) {
         return line.indexOf(tag) === 0
     }
-    // Показывать ли в ленте «мышление» модели (строки [[think]]), а не только
-    // готовые ответы. Включено по умолчанию. Это настройка ОТОБРАЖЕНИЯ
-    // клиента (в отличие от режима сессии), поэтому живёт в глобальных
-    // настройках, а не в настройках конкретной сессии.
+    // Millisecond ts from `[[t:<ms>]]`, or current time if missing.
+    function msOf(line) {
+        var m = app.tsRe.exec(line)
+        return m ? m[1] : String(Date.now())
+    }
+    // Translate a worker i18n token (`[[s:KEY\u001fARG…]]` / `[[e:KEY…]]`)
+    // into a display string using the app's active language (qsTr/.ts).
+    function trSvc(tag, token) {
+        var end = token.indexOf(app.kTagClose, tag.length)
+        var inner = token.substring(tag.length, end > 0 ? end : token.length)
+        var parts = inner.split(app.kArgSep)
+        var text = qsTr(parts[0])
+        for (var i = 1; i < parts.length && i <= 9; i++)
+            text = text.split("%" + i).join(parts[i])
+        return text
+    }
+    // Whether to show the model's "thinking" ([[think]] lines) in the feed,
+    // not just final answers. Enabled by default. This is a client DISPLAY
+    // setting (unlike the session mode), so it lives in the global settings,
+    // not in the settings of a particular session.
     property bool showReasoning: showReasoningSetting.value !== undefined
                                  ? showReasoningSetting.value : true
-    // Режим чата по сессиям: `{ "<sessionID>": "build"|"plan" }`. Режим — это
-    // свойство каждой сессии (агент: build — активная работа, plan —
-    // планирование); выбор хранится за конкретной сессией и применяется при
-    // её открытии (см. sessionMode/setSessionMode и применение в poll()).
+    // Per-session chat mode: `{ "<sessionID>": "build"|"plan" }`. The mode is a
+    // property of each session (agent: build — active work, plan —
+    // planning); the choice is stored per session and applied when it is
+    // opened (see sessionMode/setSessionMode and its use in poll()).
     property var sessionModes: sessionModesSetting.value
                                ? JSON.parse(sessionModesSetting.value)
                                : ({})
-    // Сессии, к которым уже применяли сохранённый режим (не дёргаем сервер
-    // повторно на каждом poll одним и тем же переключением агента).
+    // Sessions whose saved mode has already been applied (we don't poke the
+    // server again on every poll with the same agent switch).
     property var sessionModesApplied: ({})
-    // Ожидающие запросы разрешений агента (`[{id,sessionID,action,resources,options}]`).
+    // Pending agent permission requests (`[{id,sessionID,action,resources,options}]`).
     property var pendingPermissions: []
-    // Дать согласие «Разрешить один раз»: true, если запрос действительно новый
-    // (для срабатывания звука только на появившихся).
+    // Granting "Allow once": true if the request is really new
+    // (so the sound fires only for newly appeared ones).
     property var knownPermissionIds: []
     property bool sttModelReady: false
-    // Рабочая директория opencode (настройка). Загружается из bridge.settings_json().
+    // opencode working directory (setting). Loaded from bridge.settings_json().
     property string workdir: ""
     property bool ttsModelReady: chosenTts !== ""
 
-    // Для детекта перехода "агент занят → свободен".
+    // For detecting the "agent busy → free" transition.
     property bool wasBusy: false
 
-    // Системные звуки для уведомлений (сканирует воркер, `[{name,path}]`).
+    // System sounds for notifications (scanned by the worker, `[{name,path}]`).
     property var sounds: []
-    // Выбранный звук уведомления (сохраняется в настройках DConf).
+    // Selected notification sound (saved in DConf settings).
     property string dingSound: dingSetting.value
 
-    // Голосовой модуль: статус из воркера (`voice_status_json`).
+    // Voice module: status from the worker (`voice_status_json`).
     property var voiceModels: []
     property variant voiceLangOptions: [ { id: "auto", name: "Auto (detect)" } ]
     property string chosenStt: ""
     property string chosenTts: ""
     property string voiceLang: "auto"
-    // Идёт ли запись с микрофона (PTT-переключатель).
+    // Whether the microphone is recording (PTT toggle).
     property bool recording: false
-    // Идёт ли распознавание речи после остановки записи.
+    // Whether speech recognition is running after the recording stopped.
     property bool recognizing: false
-    // Идёт ли озвучка ответа (для отображения кнопки «стоп»).
+    // Whether the answer is being spoken (to show the "stop" button).
     property bool ttsPlaying: false
-    // Текст баббла, который сейчас синтезируется/озвучивается (для лоадера
-    // на соответствующей кнопке озвучки). Пустая строка — ничего не озвучиваем.
+    // Text of the bubble currently being synthesised/spoken (for the loader
+    // on the corresponding TTS button). Empty string — we speak nothing.
     property string speakingBubble: ""
-    // Идёт ли синтез речи: команда отправлена воркеру, WAV ещё не пришёл
-    // в очередь (это самая «тихая» фаза, когда нужна обратная связь).
+    // Whether speech synthesis is in progress: the command was sent to the
+    // worker, the WAV is not in the queue yet (the quietest phase, where feedback matters).
     property bool ttsSynth: false
 
-    // Протокольные константы голосового модуля.
-    // Команды зеркалят `voice::cmd` в src/voice.rs, движки — `voice::engine`,
-    // фазы — `voice::Phase` (as_str). Менять их можно только с обеих сторон.
-    // Внимание: QML запрещает имена свойств с большой буквы — только lowercase.
+    // Protocol constants of the voice module.
+    // The commands mirror `voice::cmd` in src/voice.rs, the engines — `voice::engine`,
+    // the phases — `voice::Phase` (as_str). They may only be changed on both sides.
+    // Note: QML forbids property names starting with an uppercase letter — lowercase only.
     readonly property string cmdLang: "voice_lang"
     readonly property string cmdSelectStt: "voice_select_stt"
     readonly property string cmdSelectTts: "voice_select_tts"
@@ -139,10 +166,10 @@ ApplicationWindow {
     readonly property string stateDownloading: "downloading"
     readonly property string stateError: "error"
 
-    // Запрос переключить страницу карусели (0..3).
+    // Request to switch the carousel page (0..3).
     signal requestPage(int index)
 
-    // Распознанный речевой текст, который надо показать в поле ввода чата.
+    // Recognised speech text that should be shown in the chat input field.
     signal dictated(string text)
 
     ConfigurationValue {
@@ -182,20 +209,20 @@ ApplicationWindow {
         id: showReasoningSetting
         key: "/apps/harbour-opencode/showReasoning"
     }
-    // Реестр режимов по сессиям: JSON-строка `{"<sessionID>":"build"|"plan",...}`.
+    // Per-session mode registry: JSON string `{"<sessionID>":"build"|"plan",...}`.
     ConfigurationValue {
         id: sessionModesSetting
         key: "/apps/harbour-opencode/sessionModes"
     }
 
-    // Держим процесс живым, пока агент работает (иначе Sailfish усыпит его в фоне).
+    // Keep the process alive while the agent works (otherwise Sailfish puts it to sleep in the background).
     KeepAlive {
         id: agentKeepAlive
-        enabled: app.statusText === "busy"
+        enabled: app.statusBase(app.statusText) === "busy"
     }
 
-    // Пул "диней": SoundEffect нельзя перезапустить, пока играет, поэтому
-// на каждый вызов берём следующий свободный слот (ротация).
+    // Pool of "dings": SoundEffect cannot be restarted while playing, so
+// on each call we take the next free slot (rotation).
     property int dingSlot: 0
     SoundEffect { id: ding1; source: app.dingSound }
     SoundEffect { id: ding2; source: app.dingSound }
@@ -217,17 +244,17 @@ ApplicationWindow {
         onTriggered: app.poll()
     }
 
-    // Очередь озвучки: WAV-файлы синтезируются воркером асинхронно
-    // (несколько сообщений подряд = несколько файлов). Играем строго по
-    // порядку появления: mediaplayer закончил → берём следующий из очереди.
-    // Каждый элемент — `{path, body}`: body — текст баббла, которому
-    // принадлежит файл, чтобы кнопка «стоп/озвучка» следовала за текущим
-    // воспроизводимым сообщением (см. speakingBubble).
+    // TTS queue: WAV files are synthesised by the worker asynchronously
+    // (several messages in a row = several files). We play strictly in
+    // order of arrival: mediaplayer finished → take the next from the queue.
+    // Each item is `{path, body}`: body is the text of the bubble that
+    // owns the file, so the "stop/speak" button follows the currently
+    // playing message (see speakingBubble).
     property var ttsQueue: []
 
-    // Тело последнего ответа агента — привязка автосинтезированных файлов
-    // к бабблу: воркер шлёт `[[tts]]<путь>` после соответствующих текстовых
-    // строк, поэтому запоминаем последний ответ. См. ttsEnqueue/playNextTts.
+    // Body of the last agent answer — binds auto-synthesised files
+    // to a bubble: the worker sends `[[tts]]<path>` after the corresponding text
+    // lines, so we remember the last answer. See ttsEnqueue/playNextTts.
     property string pendingTtsBody: ""
 
     MediaPlayer {
@@ -246,8 +273,8 @@ ApplicationWindow {
         }
         var item = app.ttsQueue.shift()
         ttsPlayer.source = "file://" + item.path
-        // Индикатор озвучки едет вместе с очередью: кнопка «стоп» включается
-        // на том баббле, чей звук реально сейчас играет.
+        // The TTS indicator moves with the queue: the "stop" button turns on
+        // for the bubble whose sound is actually playing right now.
         app.speakingBubble = item.body
         app.ttsPlaying = true
         app.ttsSynth = false
@@ -256,9 +283,9 @@ ApplicationWindow {
     function ttsEnqueue(path) {
         if (path === "" || path === undefined)
             return
-        // К какому бабблу относится файл: для ручной кнопки это текст, который
-        // мы отправили на синтез (speakingBubble); для автоозвучки — последний
-        // ответ агента (pendingTtsBody).
+        // Which bubble the file belongs to: for the manual button this is the text
+        // we sent to synthesis (speakingBubble); for auto-TTS — the last
+        // agent answer (pendingTtsBody).
         var body = app.speakingBubble
         if ((body === "" || body === undefined) && app.pendingTtsBody !== "")
             body = app.pendingTtsBody
@@ -271,8 +298,8 @@ ApplicationWindow {
         app.ttsPlaying = false
         app.ttsSynth = false
         app.speakingBubble = ""
-        // Просим воркер не отдавать WAV, если piper ещё синтезирует,
-        // иначе файл «дозреет» и озвучка снова включится.
+        // Ask the worker not to hand over the WAV if piper is still synthesising,
+        // otherwise the file "ripens" and playback switches on again.
         app.voiceCmd(app.cmdTtsCancel, "")
         ttsPlayer.stop()
     }
@@ -286,7 +313,7 @@ ApplicationWindow {
         var st = bridge.status_text()
         if (st !== undefined && st !== "")
             app.statusText = st
-        if (app.statusText === "busy") {
+        if (app.statusBase(app.statusText) === "busy") {
             app.wasBusy = true
         } else if (app.wasBusy) {
             app.wasBusy = false
@@ -299,40 +326,75 @@ ApplicationWindow {
             for (var i = 0; i < lines.length; i++) {
                 var line = lines[i]
                 if (line !== "") {
-                    // Строка без временной метки — используем для маркеров
-                    // [[think]] и для привязки автоозвучки к бабблу.
+                    // Line without the timestamp — used for [[think]] and for
+                    // binding auto-TTS to the bubble.
                     var bodyTmp = app.stripTs(line)
 
-                    // Ошибка сервера (например "free usage exceeded") — сразу в нотификацию
-                    // и в ленту, чтобы не выглядело, будто агент молча работает.
-                    if (app.lineIs(line, app.kErrPrefix)) {
+                    // Server error (e.g. "free usage exceeded") — notify right
+                    // away and push a red bubble, so it does not look like the
+                    // agent is silently working. Worker sends `[[e:KEY]]`.
+                    if (app.lineIs(bodyTmp, app.kErrOpen)) {
                         app.recognizing = false
-                        var errText = line.substring(app.kErrPrefix.length).replace(/^\s+/, "")
+                        var errText = app.trSvc(app.kErrOpen, bodyTmp)
                         app.publishError(errText)
-                        acc = acc.concat(line)
+                        acc = acc.concat(app.kTsOpen + app.msOf(line) + app.kTsClose
+                                         + app.kErrTag + errText)
                         continue
                     }
 
-                    // Рассуждения модели ([[think]]) — при настройке «показывать
-                    // мышление» Rust присылает их строкой перед ответом; если
-                    // отключено — просто не показываем.
+                    // Service notice (voice/TTS/STT/catalog messages): worker
+                    // sends `[[s:KEY\u001fARG…]]`, we translate by the app
+                    // language and render as a SYSTEM bubble (no speak button,
+                    // no auto-TTS binding — see isSvc in ChatPage).
+                    if (app.lineIs(bodyTmp, app.kSvcOpen)) {
+                        acc = acc.concat(app.kTsOpen + app.msOf(line) + app.kTsClose
+                                         + app.kSvcTag + app.trSvc(app.kSvcOpen, bodyTmp))
+                        continue
+                    }
+
+                    // Control line: the STT cycle finished (terminal message
+                    // was sent before it). Stop the mic loader; not a bubble.
+                    if (app.lineIs(bodyTmp, app.kSttDoneTag)) {
+                        app.recognizing = false
+                        continue
+                    }
+
+                    // Live model reasoning ([[thinklive]]): the worker streams
+                    // deltas while the model thinks. Replace the trailing
+                    // [[think]] bubble in place (or start a new one) so the text
+                    // grows live instead of stacking a bubble per chunk.
+                    if (app.lineIs(bodyTmp, app.kThinkLiveTag)) {
+                        if (!app.showReasoning)
+                            continue
+                        var rText = bodyTmp.substring(app.kThinkLiveTag.length)
+                        var rLine = app.kTsOpen + app.msOf(line) + app.kTsClose
+                                    + app.kThinkTag + rText
+                        if (acc.length > 0
+                            && app.lineIs(app.stripTs(acc[acc.length - 1]), app.kThinkTag)) {
+                            acc[acc.length - 1] = rLine
+                        } else {
+                            acc = acc.concat(rLine)
+                        }
+                        continue
+                    }
+
+                    // Model reasoning ([[think]]) — Rust sends it as a line
+                    // before the answer; hidden when the setting is off.
                     if (app.lineIs(bodyTmp, app.kThinkTag) && !app.showReasoning)
                         continue
 
-                    // Терминальный результат распознавания — снимаем лоадер.
-                    if (app.lineIs(line, app.kSttTag)
-                        || app.lineIs(line, app.kVoicePrefix + " ошибка")
-                        || app.lineIs(line, app.kVoicePrefix + " распознано пусто")
-                        || app.lineIs(line, app.kVoicePrefix + " модель не скачана"))
+                    // Terminal recognition result — drop the loader.
+                    if (app.lineIs(line, app.kSttTag))
+                        app.recognizing = false
                         app.recognizing = false
 
-                    // Распознанное (STT): в инпут или сразу агенту — по настройкам.
+                    // Recognised (STT): into the input or straight to the agent — depending on settings.
                     if (app.lineIs(line, app.kSttTag)) {
                         var text = line.substring(app.kSttTag.length).replace(/^\s+/, "")
                         if (text !== "") {
                             if (app.inputMode === "voice" || app.sendImmediately) {
-                                // Баббл в acc: после цикла идёт app.messages = acc,
-                                // иначе добавленный send() баббл затёрся бы.
+                                // Bubble into acc: app.messages = acc comes after the loop,
+                                // otherwise the bubble added by send() would be overwritten.
                                 acc = acc.concat(app.kTsOpen + Date.now() + app.kTsClose
                                                 + app.kUserPrefix + text)
                                 bridge.send_prompt(text)
@@ -343,7 +405,7 @@ ApplicationWindow {
                         continue
                     }
 
-                    // Синтез озвучки готов: файл в стопку очереди, в ленту не добавляем.
+                    // TTS synthesis done: put the file into the queue, do not add it to the feed.
                     if (app.lineIs(line, app.kTtsTag)) {
                         app.recognizing = false
                         var ttsPath = line.substring(app.kTtsTag.length).replace(/^\s+/, "")
@@ -352,11 +414,14 @@ ApplicationWindow {
                         continue
                     }
 
-                    // Запоминаем последний ответ агента — к нему привязываем
-                    // автосинтезированные WAV (идут после текста). Строчки
-                    // пользователя и рассуждения не считаем ответом.
+                    // Remember the last agent answer — auto-synthesised
+                    // WAVs are bound to it (they come after the text). User
+                    // lines, reasoning and system bubbles (service/error)
+                    // are not counted as an answer.
                     if (bodyTmp !== "" && !app.lineIs(bodyTmp, app.kUserPrefix)
-                        && !app.lineIs(bodyTmp, app.kThinkTag))
+                        && !app.lineIs(bodyTmp, app.kThinkTag)
+                        && !app.lineIs(bodyTmp, app.kErrTag)
+                        && !app.lineIs(bodyTmp, app.kSvcTag))
                         app.pendingTtsBody = bodyTmp.replace(/^\n+/, "")
 
                     acc = acc.concat(line)
@@ -404,9 +469,9 @@ ApplicationWindow {
         var cid = bridge.current_session_id()
         if (cid !== undefined && cid !== null && cid !== app.currentSessionId) {
             app.currentSessionId = cid
-            // Новая сессия активирована — применяем сохранённый за ней режим
-            // (Build/Plan), если он есть; сессии без сохранённого выбора живут
-            // в режиме сервера по умолчанию.
+            // A new session became active — apply the mode saved for it
+            // (Build/Plan) if any; sessions without a saved choice live
+            // in the server's default mode.
             if (cid !== "" && cid in app.sessionModes
                     && !(cid in app.sessionModesApplied)) {
                 app.sessionModesApplied[cid] = true
@@ -438,7 +503,7 @@ ApplicationWindow {
             try {
                 var parsed = JSON.parse(pj)
                 app.pendingPermissions = parsed
-                // Новые запросы (ещё не показанные) — просигналить пользователю.
+                // New requests (not shown yet) — signal the user.
                 var fresh = false
                 for (var pi = 0; pi < parsed.length; pi++) {
                     var pid = parsed[pi].id
@@ -468,6 +533,7 @@ ApplicationWindow {
     }
 
     function statusColor(s) {
+        if (s.indexOf("retry|") === 0) return "#ff9800"
         switch (s) {
         case "connecting": return "#2196f3"
         case "idle":       return "#4caf50"
@@ -475,6 +541,13 @@ ApplicationWindow {
         case "error":      return "#f44336"
         default:           return Theme.secondaryColor
         }
+    }
+
+    // Base status independent of the retry detail token (`retry|…` counts as
+    // busy). The worker sets `retry|<next_ms>|<attempt>|<message>` while the
+    // server is retrying a failed model call (see main.rs `session.status`).
+    function statusBase(s) {
+        return s.indexOf("retry|") === 0 ? "busy" : s
     }
 
     function send(text) {
@@ -488,9 +561,9 @@ ApplicationWindow {
         bridge.send_prompt(t)
     }
 
-    // Режим сессии (агент build/plan) — свойство конкретной сессии. Выбор
-    // запоминается за сессией в sessionModes и применяется при её открытии
-    // (в poll()) или сразу, если сессия активна.
+    // Session mode (build/plan agent) — a property of a particular session. The
+    // choice is remembered per session in sessionModes and applied when it is
+    // opened (in poll()) or immediately if the session is active.
     function sessionMode(sid) {
         if (sid && sid in app.sessionModes && app.sessionModes[sid])
             return app.sessionModes[sid]
@@ -510,7 +583,7 @@ ApplicationWindow {
 
     function clearHistory() { app.messages = [] }
 
-    // --- Голосовой модуль -------------------------------------------------
+    // --- Voice module -----------------------------------------------------
     function voiceCmd(cmd, val) {
         bridge.voice_command(cmd, val === undefined ? "" : val)
     }
@@ -583,8 +656,8 @@ ApplicationWindow {
     }
 
     function deleteAllSessions() {
-        // Пустая новая сессия: сбросить ленту, иначе после delete_all останется
-        // старая история (новую сессию Rust создаёт асинхронно).
+        // Empty new session: reset the feed, otherwise the old history would
+        // remain after delete_all (Rust creates the new session asynchronously).
         app.messages = []
         app.currentSessionId = ""
         bridge.delete_all_sessions()
@@ -614,7 +687,7 @@ ApplicationWindow {
     onPttPositionChanged: { pttPositionSetting.value = app.pttPosition; pttPositionSetting.sync() }
     onTtsModeChanged: {
         ttsModeSetting.value = app.ttsMode; ttsModeSetting.sync()
-        // Синхронизируем режим с Rust-стороной (tts_mode), иначе автоозвучка не включится.
+        // Sync the mode with the Rust side (tts_mode), otherwise auto-TTS will not turn on.
         app.voiceCmd(app.cmdTtsMode, app.ttsMode)
     }
     onSoundOnFinishChanged: { soundOnFinishSetting.value = app.soundOnFinish; soundOnFinishSetting.sync() }
@@ -623,8 +696,8 @@ ApplicationWindow {
     onShowReasoningChanged: { showReasoningSetting.value = app.showReasoning; showReasoningSetting.sync() }
     onDingSoundChanged: { if (app.dingSound) dingSetting.value = app.dingSound; dingSetting.sync() }
 
-    // При старте синхронизируем сохранённый режим озвучки (auto/button/off)
-    // с Rust-стороной — иначе `onTtsModeChanged` не сработает для стартового значения.
+    // At startup we sync the saved TTS mode (auto/button/off)
+    // with the Rust side — otherwise `onTtsModeChanged` will not fire for the initial value.
     Component.onCompleted: {
         app.voiceCmd(app.cmdTtsMode, app.ttsMode)
     }
@@ -661,9 +734,9 @@ ApplicationWindow {
         dingSetting.sync()
     }
 
-    // Превью выбранной мелодии: сначала глушим все слоты, затем играем
-    // с небольшой паузой — мгновенный play после stop часто не срабатывает
-    // (звук «через раз»).
+    // Preview of the selected tune: first mute all slots, then play
+    // with a small pause — an instant play after stop often fails
+    // (the sound works "every other time").
     Timer {
         id: dingPreviewTimer
         interval: 80
@@ -691,7 +764,7 @@ ApplicationWindow {
         notify.publish()
     }
 
-    // Ошибка сервера: всегда видимое уведомление + статус.
+    // Server error: always-visible notification + status.
     function publishError(msg) {
         app.statusText = "error"
         if (msg === "") msg = qsTr("Server error")
@@ -699,13 +772,13 @@ ApplicationWindow {
         app.publishNotification(qsTr("Server error"), msg)
     }
 
-    // Dev (только debug-сборка): сгенерировать мок-ошибку сервера в ленту.
+    // Dev (debug build only): generate a mock server error into the feed.
     function mockServerError(kind) {
         if (app.devTools)
             bridge.mock_error(kind)
     }
 
-    // Dev (только debug-сборка): сгенерировать мок-запрос доступа агента.
+    // Dev (only in a debug build): generate a mock agent access request.
     function mockPermission() {
         if (app.devTools)
             bridge.mock_permission()
@@ -735,12 +808,12 @@ ApplicationWindow {
             app.abortSession(app.currentSessionId)
     }
 
-    // Ответ на запрос разрешения агента: once / always / reject.
+    // Answer to an agent permission request: once / always / reject.
     function answerPermission(session, id, response) {
         bridge.answer_permission(session, id, response)
     }
 
-    // показать/скрыть оверлей с запросом разрешения.
+    // show/hide the permission request overlay.
     property bool permissionOverlayVisible: false
     function showPermissionOverlay() {
         app.permissionOverlayVisible = app.pendingPermissions.length > 0
@@ -753,8 +826,8 @@ ApplicationWindow {
                 onRequestPage: pager.currentIndex = index
             }
 
-            // Карусель: [0] Global | [1] Sessions | [2] Chat | [3] Session
-            // PagedView даёт снап и горизонтальный свайп (snapMode у Flickable — баг, см. память).
+            // Carousel: [0] Global | [1] Sessions | [2] Chat | [3] Session
+            // PagedView gives snap and horizontal swipe (snapMode on Flickable is a bug, see memory).
             PagedView {
                 id: pager
                 anchors.fill: parent
@@ -778,7 +851,7 @@ ApplicationWindow {
                 Component { id: sessionSettingsPage; SessionSettingsPage { appWindow: app } }
             }
 
-            // Индикатор точками (в SFOS 5.1 готового PageIndicator нет — рисуем сами).
+            // Dot indicator (SFOS 5.1 has no ready-made PageIndicator — we draw it ourselves).
             Row {
                 id: dots
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -800,9 +873,9 @@ ApplicationWindow {
                 }
             }
 
-            // Оверлей запроса разрешения от агента (поверх карусели).
-            // Затемнение фона выносим в отдельный Rectangle БЕЗ opacity на
-            // контейнере: иначе прозрачными становятся текст и кнопки.
+            // Agent permission request overlay (on top of the carousel).
+            // We put the background dimming in a separate Rectangle WITHOUT opacity
+            // on the container: otherwise the text and buttons become transparent.
             Rectangle {
                 id: permissionOverlay
                 visible: app.permissionOverlayVisible && app.pendingPermissions.length > 0
@@ -810,7 +883,7 @@ ApplicationWindow {
                 color: Qt.rgba(0, 0, 0, 0.65)
                 z: 20
 
-                // Плашка с текстом запроса — почти непрозрачная, чтобы читалось.
+                // The card with the request text is almost opaque so it stays readable.
                 Rectangle {
                     id: permissionCard
                     anchors.centerIn: parent

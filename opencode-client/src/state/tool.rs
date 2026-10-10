@@ -2,14 +2,14 @@ use std::collections::HashMap;
 
 use crate::types::tool::ToolState;
 
-/// Один тул текущего хода: имя + состояние.
+/// A single tool of the current turn: name + state.
 #[derive(Debug, Clone)]
 pub struct ToolEntry {
     pub name: String,
     pub state: ToolState,
 }
 
-/// Хранилище состояний тулов: callID -> ToolEntry.
+/// Tool state store: callID -> ToolEntry.
 #[derive(Debug, Default)]
 pub struct ToolStore {
     pub states: HashMap<String, ToolEntry>,
@@ -20,7 +20,7 @@ impl ToolStore {
         self.states.insert(call_id, ToolEntry { name, state });
     }
 
-    /// Число тулов в каждом состоянии — удобно для индикаторов в QML.
+    /// Number of tools in each state — handy for indicators in QML.
     pub fn counts(&self) -> (usize, usize, usize, usize) {
         let mut pending = 0;
         let mut running = 0;

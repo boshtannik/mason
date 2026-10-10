@@ -46,8 +46,8 @@ Item {
                     text: qsTr("Delete")
                     onClicked: {
                         var sid = modelData.id
-                        // Полоса отсчёта — на самой строке, чтобы сразу можно было
-                        // удалить несколько сессий подряд (RemorsePopup блокировал экран).
+                        // The countdown bar is on the row itself, so several sessions
+                        // can be deleted in a row (RemorsePopup blocked the screen).
                         item.showRemorse(qsTr("Delete session"), function() {
                             appWindow.deleteSession(sid)
                         })

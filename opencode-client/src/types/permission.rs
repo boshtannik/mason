@@ -2,8 +2,8 @@ use serde::Deserialize;
 
 use super::event::PermissionV2Source;
 
-/// Запрос разрешения, ожидающий ответа пользователя.
-/// Поля соответствуют официальному событию permission.v2.asked (SDK 1.18.31).
+/// Permission request awaiting a user response.
+/// The fields correspond to the official permission.v2.asked event (SDK 1.18.31).
 #[derive(Debug, Clone, Deserialize)]
 pub struct Permission {
     pub id: String,

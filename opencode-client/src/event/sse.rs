@@ -6,7 +6,7 @@ use reqwest::Client;
 
 use crate::types::GlobalEvent;
 
-/// SSE-клиент: читает /global/event и отдаёт серию GlobalEvent.
+/// SSE client: reads /global/event and yields a stream of GlobalEvent.
 pub struct SseClient {
     http: Client,
     base: String,
@@ -36,7 +36,7 @@ impl SseClient {
             return Err(format!("SSE status: {}", resp.status()));
         }
 
-        // Конкатенируем чанки и режем по строкам: "data: <json>"
+        // Concatenate chunks and split by lines: "data: <json>"
         let stream = unfold(
             (resp.bytes_stream(), Vec::new(), VecDeque::new()),
             move |(mut chunks, mut buffer, mut pending)| async move {
@@ -61,7 +61,7 @@ impl SseClient {
 }
 
 fn parse_events(buffer: &mut Vec<u8>, out: &mut VecDeque<Result<GlobalEvent, String>>) {
-    // Разбираем только полные строки, заканчивающиеся на \n
+    // Parse only complete lines ending with \n
     let text = String::from_utf8_lossy(buffer);
     let mut complete_idx = 0;
     for line in text.split_inclusive('\n') {

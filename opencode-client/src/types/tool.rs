@@ -21,7 +21,7 @@ pub enum ToolState {
 }
 
 impl ToolState {
-    /// Статус для ленты чата: running | completed | error.
+    /// Status for the chat feed: running | completed | error.
     pub fn ui_status(&self) -> &'static str {
         match self {
             ToolState::Pending { .. } | ToolState::Running { .. } => "running",
@@ -30,7 +30,7 @@ impl ToolState {
         }
     }
 
-    /// Короткое описание для карточки тула в чате.
+    /// Short description for the tool card in the chat.
     pub fn description(&self) -> String {
         match self {
             ToolState::Pending { input } | ToolState::Running { input } => input
@@ -46,7 +46,7 @@ impl ToolState {
     }
 }
 
-/// Тур-часть сообщения: вызов инструмента с состоянием.
+/// Turn part of a message: a tool call with its state.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolPart {
     pub id: String,

@@ -1,8 +1,9 @@
-//! Голос по механике Speech Note (dsnote): каталог моделей (whisper/piper),
-//! скачивание с HF, запись с микрофона (parec), транскрипция (whisper-cli),
-//! озвучка (piper). Всё локально, пользователь сам выбирает и качает модели.
+//! Voice modeled after Speech Note (dsnote): model catalog (whisper/piper),
+//! downloading from HF, microphone recording (parec), transcription (whisper-cli),
+//! playback (piper). Everything runs locally; the user picks and downloads models.
 
 use crate::cmd::Cmd;
+use crate::i18n::{now_ms, svc_line};
 use crate::markers::*;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -12,25 +13,25 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const CATALOG_PATH: &str = "/usr/share/harbour-opencode/models.json";
-/// Свежий каталог моделей скачивается с официального репо dsnote (mkiol) —
-/// тот же формат и источник, из которого вырезан штатный каталог RPM.
+/// The fresh model catalog is downloaded from the official dsnote (mkiol) repo —
+/// the same format and source the stock RPM catalog was cut from.
 pub const CATALOG_URL: &str =
     "https://raw.githubusercontent.com/mkiol/dsnote/main/config/models.json";
-/// Движки, которые поддерживает приложение (остальные из каталога отбрасываются).
+/// Engines the app supports (the rest are dropped from the catalog).
 pub const SUPPORTED_ENGINES: [&str; 3] = ["stt_whisper", "tts_piper", "tts_espeak"];
 const CATALOG_USER_FILE: &str = "catalog.json";
 pub const WHISPER_BIN: &str = "/usr/libexec/harbour-opencode/whisper-cli";
-/// Статическая сборка piper (aarch64) ставится в RPM рядом с whisper-cli.
-/// Каталог содержит espeak-ng-data и свои .so (RUNPATH=$ORIGIN).
+/// Static piper build (aarch64) ships in the RPM next to whisper-cli.
+/// Its directory holds espeak-ng-data and its own .so files (RUNPATH=$ORIGIN).
 pub const PIPER_HOME: &str = "/usr/libexec/harbour-opencode/piper";
 pub const PIPER_BIN: &str = "/usr/libexec/harbour-opencode/piper/piper";
 const MODELS_SUBDIR: &str = "harbour-opencode/models";
-/// Файл сохранения выбора STT/TTS/языка (переживает перезапуски приложения).
+/// File that persists the STT/TTS/language choice (survives app restarts).
 const CONFIG_FILE: &str = "voice_state.json";
 const REC_RAW: &str = "/tmp/harbour-opencode-ptt.pcm";
-/// Временный WAV для озвучки: синтез (воркер) → файл → QML MediaPlayer.
-/// Имя уникальное на каждый синтез, чтобы несколько ответов подряд
-/// можно было воспроизводить последовательно (очередь в QML).
+/// Temporary WAV for playback: synthesis (worker) → file → QML MediaPlayer.
+/// The name is unique per synthesis so several consecutive answers
+/// can be played in sequence (queue in QML).
 const TTS_OUT_DIR: &str = "/tmp";
 static TTS_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -38,8 +39,8 @@ fn tts_out_path() -> String {
     format!("{TTS_OUT_DIR}/harbour-opencode-tts-{:03}.wav", TTS_SEQ.fetch_add(1, Ordering::SeqCst))
 }
 
-/// Режим озвучки ответов: [Auto] — озвучивать каждый ответ, [Button] — только
-/// по кнопке 🔉 на баббле, [Off] — выключена. Единый источник строк протокола.
+/// Answer playback mode: [Auto] — speak every answer, [Button] — only
+/// via the 🔉 button on the bubble, [Off] — off. Single source of protocol strings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TtsMode {
     Auto,
@@ -74,15 +75,15 @@ impl TtsMode {
     }
 }
 
-/// Имена голосовых команд — единый источник: `crate::cmd::Cmd` (voice-варианты).
+/// Voice command names — single source of truth: `crate::cmd::Cmd` (voice variants).
 
-/// Движки моделей (ключи каталога models.json).
+/// Model engines (keys of the models.json catalog).
 pub mod engine {
     pub const STT_WHISPER: &str = "stt_whisper";
     pub const TTS_PIPER: &str = "tts_piper";
 }
 
-/// Фаза скачивания/состояние модели (сериализуется в status JSON для QML).
+/// Download phase/model state (serialized into status JSON for QML).
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     #[default]
@@ -105,7 +106,7 @@ impl Phase {
     }
 }
 
-/// Прогресс текущего скачивания + состояния моделей.
+/// Progress of the current download + model states.
 #[derive(Default, Clone)]
 pub struct DlState {
     pub id: String,
@@ -114,23 +115,29 @@ pub struct DlState {
     pub state: Phase,
 }
 
-/// Общее состояние голосового модуля (шарено с воркером и QML).
+/// Shared state of the voice module (shared with the worker and QML).
 #[derive(Default)]
 pub struct VoiceState {
     pub status: Arc<std::sync::Mutex<String>>,
-    /// Скачивания по id модели: параллельно может идти сразу несколько.
+    /// Downloads keyed by model id: several can run in parallel.
     pub dl: Arc<std::sync::Mutex<HashMap<String, DlState>>>,
     pub rec: Arc<std::sync::Mutex<Option<tokio::process::Child>>>,
     pub stt_model: Arc<std::sync::Mutex<String>>,
     pub tts_model: Arc<std::sync::Mutex<String>>,
     pub lang: Arc<std::sync::Mutex<String>>,
-    /// Режим озвучки ответов (см. [TtsMode]).
+    /// Answer playback mode (see [TtsMode]).
     pub tts_mode: Arc<std::sync::Mutex<TtsMode>>,
-    /// Модели, качание которых надо отменить (ставит command, проверяет download_model).
+    /// Models whose download should be cancelled (set by a command, checked in download_model).
     pub cancel_dl: Arc<std::sync::Mutex<HashSet<String>>>,
-    /// Отменить текущий синтез: поставить true, чтобы run_tts не пушил WAV
-    /// в очередь и удалил файл (ставит QML-стоп, проверяет run_tts).
+    /// Cancel the current synthesis: set to true so run_tts won't push the WAV
+    /// into the queue and will delete the file (set by QML stop, checked in run_tts).
     pub cancel_tts: Arc<std::sync::Mutex<bool>>,
+    /// Whether a transcription task is running right now. TTS defers while STT runs,
+    /// so the two engines don't saturate the CPU at the same time.
+    pub stt_busy: Arc<std::sync::Mutex<bool>>,
+    /// Whether a synthesis task is running right now. Only one piper at a time:
+    /// two parallel answers would race on their output files.
+    pub tts_busy: Arc<std::sync::Mutex<bool>>,
 }
 
 impl VoiceState {
@@ -144,8 +151,8 @@ impl VoiceState {
         v
     }
 
-    /// Восстановить выбор STT/TTS/языка из файла (вызывается при старте).
-    /// Выбранные модели восстанавливаются только если их файлы реально на диске.
+    /// Restore the STT/TTS/language choice from the file (called at startup).
+    /// Selected models are restored only if their files are actually on disk.
     fn load_config(&self) {
         let Some(path) = config_path() else { return };
         let Ok(raw) = std::fs::read_to_string(&path) else { return };
@@ -204,7 +211,7 @@ impl VoiceState {
         );
     }
 
-    /// Сохранить выбор STT/TTS/языка/режима озвучки в файл (переживает перезапуски).
+    /// Save the STT/TTS/language/playback-mode choice to the file (survives restarts).
     pub fn persist(&self) {
         let Some(path) = config_path() else { return };
         let stt = self.stt_model.lock().map(|g| g.clone()).unwrap_or_default();
@@ -240,7 +247,7 @@ impl VoiceState {
         self.status.clone()
     }
 
-    /// Пересобрать status_json (список моделей + прогресс + выбор).
+    /// Rebuild status_json (model list + progress + selection).
     pub fn refresh_status(&self) {
         let cat = load_catalog();
         let models = &cat["models"];
@@ -254,9 +261,9 @@ impl VoiceState {
                 let id = m["model_id"].as_str()?;
                 let dir = model_dir(id);
                 let total: u64 = m["size"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0);
-                // Модель «на месте», если на диске присутствуют все файлы каталога
-                // (на счётчик байтов не полагаемся: `size` может описывать больше,
-                // чем реально качаем — из-за этого был ложный «download failed»).
+                // A model is "in place" when all catalog files are on disk
+                // (we don't trust the byte counter: `size` may describe more than
+                // we actually download — that caused a false "download failed").
                 let got = all_present(&dir, &model_files(m));
                 let mut o = serde_json::Map::new();
                 o.insert("model_id".into(), Value::String(id.to_string()));
@@ -310,8 +317,8 @@ impl VoiceState {
 }
 
 pub fn load_catalog() -> Value {
-    // Сначала обновлённый каталог из пользовательской папки (если «Обновить
-    // каталоги» уже скачивали), иначе — штатный из RPM.
+    // First the updated catalog from the user folder (if "Refresh
+    // catalogs" was already used), otherwise the stock one from the RPM.
     let user = data_dir().join(CATALOG_USER_FILE);
     let user = (user.exists()).then(|| user);
     user.and_then(|p| std::fs::read_to_string(p).ok())
@@ -320,9 +327,9 @@ pub fn load_catalog() -> Value {
         .unwrap_or_else(|| serde_json::json!({ "langs": [], "models": [] }))
 }
 
-/// Скачать свежий каталог моделей с GitHub (mkiol/dsnote) и сохранить в
-/// пользовательскую папку. Возвращает версию каталога и число моделей после
-/// фильтрации по поддерживаемым движкам.
+/// Download the fresh model catalog from GitHub (mkiol/dsnote) and save it to
+/// the user folder. Returns the catalog version and the number of models after
+/// filtering by supported engines.
 pub async fn update_catalog() -> Result<(u64, usize), String> {
     let client = reqwest::Client::builder()
         .user_agent("harbour-opencode/0.1")
@@ -340,7 +347,7 @@ pub async fn update_catalog() -> Result<(u64, usize), String> {
     let mut cat: Value =
         serde_json::from_str(&body).map_err(|e| format!("не JSON каталога: {e}"))?;
 
-    // Оставляем только те модели, которые приложение умеет скачивать/использовать.
+    // Keep only the models that the app can download/use.
     if let Some(models) = cat["models"].as_array_mut() {
         models.retain(|m| {
             m["engine"]
@@ -375,7 +382,7 @@ fn base_dir() -> PathBuf {
     data_dir().join("models")
 }
 
-/// Директория данных приложения (настройки + модели).
+/// Application data directory (settings + models).
 fn data_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/nemo".to_string());
     let data = std::env::var("XDG_DATA_HOME")
@@ -383,7 +390,7 @@ fn data_dir() -> PathBuf {
     Path::new(&data).join("harbour-opencode")
 }
 
-/// Путь к файлу сохранения голосовых настроек.
+/// Path to the voice settings file.
 fn config_path() -> Option<PathBuf> {
     std::env::var("HOME").ok()?;
     Some(data_dir().join(CONFIG_FILE))
@@ -400,7 +407,7 @@ fn model_file(m: &Value) -> Option<PathBuf> {
     Some(model_dir(id).join(name))
 }
 
-/// Все имена файлов модели (urls + sups[*].urls): по ним решаем, скачана ли она.
+/// All model file names (urls + sups[*].urls): by them we decide whether it is downloaded.
 fn model_files(m: &Value) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let mut add = |urls: &Value| {
@@ -426,7 +433,7 @@ fn all_present(dir: &Path, names: &[String]) -> bool {
     !names.is_empty() && names.iter().all(|n| dir.join(n).exists())
 }
 
-/// Модель найдена в каталоге и её файлы реально на диске (валидация выбора).
+/// The model is found in the catalog and its files are actually on disk (selection validation).
 fn model_ready(id: &str, cat: &Value) -> bool {
     let m = cat["models"]
         .as_array()
@@ -437,7 +444,7 @@ fn model_ready(id: &str, cat: &Value) -> bool {
     }
 }
 
-/// Скачать модель: все файлы из `urls` (и `sups[*].urls`) в `models/{id}/`.
+/// Download a model: all files from `urls` (and `sups[*].urls`) into `models/{id}/`.
 pub async fn download_model(
     voice: &Arc<VoiceState>,
     id: &str,
@@ -570,7 +577,7 @@ log::error!("models dir: {e}");
                             d.done += c.len() as u64;
                         }
                     }
-                    // Раз в ~250 мс публикуем прогресс, чтобы QML видел % вживую.
+                    // Publish progress every ~250 ms so QML sees % live.
                     if last_refresh.elapsed() >= Duration::from_millis(250) {
                         last_refresh = Instant::now();
                         voice.refresh_status();
@@ -601,7 +608,7 @@ log::error!("models dir: {e}");
             .unwrap_or(0);
         let mut dl = voice.dl.lock().unwrap();
         if cancelled {
-            // Отмена: выкидываем частично скачанные файлы и сбрасываем запись.
+            // Cancelled: throw out the partially downloaded files and reset the record.
             let _ = std::fs::remove_dir_all(&dir);
             dl.remove(id);
         } else if let Some(d) = dl.get_mut(id) {
@@ -615,9 +622,13 @@ log::error!("models dir: {e}");
             let state = d.state;
             if let Ok(mut q) = pending.lock() {
                 if state == Phase::Done {
-                    q.push(format!("{VOICE_PREFIX} «{name}» скачана"));
+                    q.push(svc_line(now_ms(), crate::i18n::K_MODEL_DOWNLOADED, &[name.to_string()]));
                 } else {
-                    q.push(format!("{VOICE_PREFIX} ошибка скачивания «{name}»"));
+                    q.push(svc_line(
+                        now_ms(),
+                        crate::i18n::K_MODEL_DOWNLOAD_FAILED,
+                        &[name.to_string()],
+                    ));
                 }
             }
         }
@@ -625,12 +636,51 @@ log::error!("models dir: {e}");
     voice.refresh_status();
 }
 
-/// Запустить транскрипцию wav выбранной STT-моделью.
+/// Run transcription of the wav with the selected STT model.
+/// Whisper language code from the system locale (LC_ALL/LC_MESSAGES/LANG).
+/// When unset or unrecognised we fall back to `auto` — but note that a
+/// real language skips the whisper `-l auto` language-detect pass (a full
+/// extra encode of the window), i.e. roughly halves the STT time.
+fn stt_default_language() -> String {
+    const MAP: &[(&str, &str)] = &[
+        ("ru", "ru"), ("be", "be"), ("uk", "uk"), ("en", "en"), ("fi", "fi"), ("sv", "sv"),
+        ("de", "de"), ("fr", "fr"), ("es", "es"), ("it", "it"), ("pt", "pt"), ("pl", "pl"),
+        ("nl", "nl"), ("cs", "cs"), ("sk", "sk"), ("hu", "hu"), ("ro", "ro"), ("el", "el"),
+        ("da", "da"), ("no", "no"), ("et", "et"), ("lv", "lv"), ("lt", "lt"), ("tr", "tr"),
+        ("az", "az"), ("kk", "kk"), ("uz", "uz"), ("ka", "ka"), ("hy", "hy"), ("fa", "fa"),
+        ("zh", "zh"), ("ar", "ar"), ("hi", "hi"), ("id", "id"), ("vi", "vi"), ("ms", "ms"),
+        ("th", "th"), ("ur", "ur"), ("bn", "bn"), ("ta", "ta"), ("te", "te"),
+    ];
+    for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+        if let Ok(l) = std::env::var(var) {
+            let l = l.to_ascii_lowercase();
+            let code = l.split(['_', '.', '-', '@']).next().unwrap_or("");
+            if let Some((_, w)) = MAP.iter().find(|(c, _)| *c == code) {
+                return (*w).to_string();
+            }
+        }
+    }
+    "auto".to_string()
+}
+
+/// The wrapper marks the transcription as busy; the actual work is in
+/// [run_stt_impl] so the flag is cleared on every exit path.
 pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
+    if let Ok(mut b) = voice.stt_busy.lock() {
+        *b = true;
+    }
+    run_stt_impl(voice, pending).await;
+    if let Ok(mut b) = voice.stt_busy.lock() {
+        *b = false;
+    }
+}
+
+async fn run_stt_impl(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
     let id = voice.stt_model.lock().map(|g| g.clone()).unwrap_or_default();
     if id.is_empty() {
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("{VOICE_PREFIX} сначала выберите STT-модель в настройках"));
+            q.push(svc_line(now_ms(), crate::i18n::K_STT_NO_MODEL_SELECTED, &[]));
+            q.push(proto_line(now_ms(), STT_DONE_TAG));
         }
         return;
     }
@@ -646,67 +696,103 @@ pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec
     };
     if !model_file.exists() {
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("{VOICE_PREFIX} модель не скачана: скачайте её в настройках"));
+            q.push(svc_line(now_ms(), crate::i18n::K_MODEL_NOT_DOWNLOADED, &[id]));
+            q.push(proto_line(now_ms(), STT_DONE_TAG));
         }
         return;
     }
-    // PARAM lang
+    // PARAM lang. Empty config value = use the app/system language (whisper
+    // `auto` runs an extra language-detect encode pass, so prefer a concrete
+    // language — the voice page still offers an explicit "auto" option).
     let lang = voice.lang.lock().map(|g| g.clone()).unwrap_or_default();
-    let lang = if lang.is_empty() { "auto".to_string() } else { lang };
+    let lang = if lang.is_empty() { stt_default_language() } else { lang };
     let wav = format!("{REC_RAW}.wav");
     log::info!("STT: модель={id} lang={lang} файл={wav}");
-    // FUTO-подход: audio_ctx подрезаем под реальную длину записи (кадр 320 сэмплов,
-    // +32 кадров на декодер), потоки по числу ядер. Один общий бинарь, без DOTPROD.
-    let audio_ctx = std::fs::metadata(&wav)
-        .map(|m| (m.len().saturating_sub(44) / 2) as usize) // samples из 16-бит PCM
-        .map(|samples| samples / 320 + 32)
-        .map(|ctx| ctx.clamp(272, 1500))
+    // FUTO approach: audio_ctx is trimmed to the actual recording length (frame of 320
+    // samples, +32 frames for the decoder), threads by core count, OpenMP from the build.
+    let samples = std::fs::metadata(&wav)
+        .map(|m| (m.len().saturating_sub(44) / 2) as usize) // samples from 16-bit PCM
         .unwrap_or(0);
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
-    log::info!("STT: audio_ctx={audio_ctx} threads={threads}");
+    let audio_ctx = (samples / 320 + 32).clamp(272, 1500) as u32;
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16) as u32;
+    log::info!("STT: samples={samples} audio_ctx={audio_ctx} threads={threads}");
     if let Ok(mut q) = pending.lock() {
-        q.push(format!("{VOICE_PREFIX} распознаю…"));
+        q.push(svc_line(now_ms(), crate::i18n::K_STT_RECOGNIZING, &[]));
     }
 
-    let out = match tokio::process::Command::new(WHISPER_BIN)
-        .arg("-m").arg(&model_file)
-        .arg("-f").arg(&wav)
-        .arg("-l").arg(&lang)
-        .arg("-t").arg(threads.to_string())
-        .arg("-nt")
-        .arg("-c").arg(audio_ctx.to_string())
-        .output()
-        .await
-    {
-        Ok(o) => o,
-        Err(e) => {
-            log::error!("whisper-cli не запустился: {e}");
-            if let Ok(mut q) = pending.lock() {
-                q.push(format!("{VOICE_PREFIX} ошибка запуска STT: {e}"));
+    // Empty means whisper-cli did not find speech inside the trimmed window. A very short
+    // utterance can fall below it, so retry once with the FULL context on an empty result.
+    let ctxs: &[u32] = if audio_ctx > 0 { &[audio_ctx, 0] } else { &[0] };
+    let mut text: Option<String> = None;
+    let mut run_failure: Option<String> = None;
+    let mut spawn_failure: Option<String> = None;
+    let mut attempts = 0u32;
+    for ctx in ctxs.iter().copied() {
+        attempts += 1;
+        let mut cmd = tokio::process::Command::new(WHISPER_BIN);
+        cmd.arg("-m").arg(&model_file)
+            .arg("-f").arg(&wav)
+            .arg("-l").arg(&lang)
+            .arg("-t").arg(threads.to_string())
+            .arg("-nt");
+        if ctx > 0 {
+            cmd.arg("-c").arg(ctx.to_string());
+        }
+        let out = match cmd.output().await {
+            Ok(o) => o,
+            Err(e) => {
+                spawn_failure = Some(e.to_string());
+                break;
             }
-            return;
+        };
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            log::error!("whisper-cli (ctx={ctx}): {stderr}");
+            run_failure = Some(stderr);
+            break;
         }
-    };
-    if !out.status.success() {
-        log::error!("whisper-cli: {}", String::from_utf8_lossy(&out.stderr));
+        let txt = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !txt.is_empty() {
+            text = Some(txt);
+            break;
+        }
+        log::warn!("STT: пустой результат при ctx={ctx}, повторяю с полным окном");
+    }
+
+    if let Some(e) = spawn_failure {
+        log::error!("whisper-cli не запустился: {e}");
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("{VOICE_PREFIX} ошибка распознавания (см. лог)"));
+            q.push(svc_line(now_ms(), crate::i18n::K_STT_RUN_FAILED, &[e]));
+            q.push(proto_line(now_ms(), STT_DONE_TAG));
         }
         return;
     }
-    let txt = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if txt.is_empty() {
+    if run_failure.is_some() {
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("{VOICE_PREFIX} распознано пусто"));
+            q.push(svc_line(now_ms(), crate::i18n::K_STT_RESULT_FAILED, &[]));
+            q.push(proto_line(now_ms(), STT_DONE_TAG));
         }
         return;
     }
-    if let Ok(mut q) = pending.lock() {
-        q.push(format!("{STT_TAG} {txt}"));
+    match text {
+        Some(txt) => {
+            if let Ok(mut q) = pending.lock() {
+                q.push(format!("{STT_TAG} {txt}"));
+            }
+        }
+        None => {
+            // Diagnostics: how long the recording was when whisper saw nothing.
+            let ms = if samples > 0 { samples * 1000 / 16000 } else { 0 };
+            log::info!("STT: пусто после {attempts} попыток (запись {ms} мс, {samples} сэмплов)");
+            if let Ok(mut q) = pending.lock() {
+                q.push(svc_line(now_ms(), crate::i18n::K_STT_EMPTY, &[]));
+                q.push(proto_line(now_ms(), STT_DONE_TAG));
+            }
+        }
     }
 }
 
-/// 44-байтный RIFF/WAV заголовок для PCM 16 кГц / моно / s16.
+/// 44-byte RIFF/WAV header for PCM 16 kHz / mono / s16.
 fn wav_header(size: u32) -> Vec<u8> {
     let mut h = Vec::with_capacity(44);
     h.extend_from_slice(b"RIFF");
@@ -725,7 +811,7 @@ fn wav_header(size: u32) -> Vec<u8> {
     h
 }
 
-/// Убить parec и обернуть PCM в WAV.
+/// Kill parec and wrap the PCM in a WAV.
 pub async fn stop_recording(voice: &Arc<VoiceState>) {
     let child = voice.rec.lock().map(|mut c| c.take()).unwrap_or_default();
     if let Some(mut ch) = child {
@@ -776,7 +862,7 @@ pub async fn start_recording(voice: &Arc<VoiceState>) {
     }
 }
 
-/// Найти первую скачанную модель движка (для автозамены после удаления).
+/// Find the first downloaded model of the engine (for auto-replacement after deletion).
 fn replacement_model(exclude_id: &str, engine: &str) -> Option<String> {
     let cat = load_catalog();
     let models = cat["models"].as_array()?;
@@ -797,7 +883,7 @@ fn replacement_model(exclude_id: &str, engine: &str) -> Option<String> {
     None
 }
 
-/// STT-точка из QML: спонсит задачу транскрипции.
+/// STT entry point from QML: spawns the transcription task.
 pub async fn stt_from_call(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
     let voice2 = voice.clone();
     let pending2 = pending.clone();
@@ -806,7 +892,7 @@ pub async fn stt_from_call(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mut
     });
 }
 
-/// Найти пути .onnx и .onnx.json выбранной piper-модели в каталоге моделей.
+/// Find the .onnx and .onnx.json paths of the selected piper model in the model catalog.
 fn piper_files(model: &Value) -> Option<(PathBuf, PathBuf)> {
     let id = model["model_id"].as_str()?;
     let dir = model_dir(id);
@@ -825,16 +911,114 @@ fn piper_files(model: &Value) -> Option<(PathBuf, PathBuf)> {
     (onnx.exists() && json.exists()).then_some((onnx, json))
 }
 
-/// Синтезировать текст выбранной TTS-моделью в WAV и попросить QML проиграть его.
+/// Strip markdown formatting before synthesis: headings, lists, block quotes,
+/// code fences, inline links and the markup symbols (** ~ # | >) — so the
+/// speech engine gets clean prose instead of reading the markup characters.
+fn strip_markdown_for_tts(md: &str) -> String {
+    let mut out = String::new();
+    let mut in_fence = false;
+    for line in md.lines() {
+        let t = line.trim();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence || t.is_empty() {
+            continue;
+        }
+        // Horizontal rules.
+        if t.chars().all(|c| "-*_~".contains(c)) && t.chars().count() >= 3 {
+            continue;
+        }
+        // Headings, block quotes and table separators: drop the leading marker.
+        let rest = t
+            .trim_start_matches(|c| c == '#' || c == '>' || c == '|')
+            .trim_start();
+        // Bullet lists: "- x", "* x", "+ x".
+        let rest = rest
+            .strip_prefix('-')
+            .or_else(|| rest.strip_prefix('*'))
+            .or_else(|| rest.strip_prefix('+'))
+            .map(|s| s.trim_start())
+            .unwrap_or(rest);
+        // Numbered lists: "1. x", "12. x".
+        let rest = {
+            let bytes = rest.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i > 0 && i < bytes.len() && bytes[i] == b'.' {
+                rest[i + 1..].trim_start()
+            } else {
+                rest
+            }
+        };
+        let cleaned = clean_inline_tts(rest);
+        if !cleaned.is_empty() {
+            out.push_str(&cleaned);
+            out.push(' ');
+        }
+    }
+    out
+}
+
+/// Inline pass: keep the link label and drop backticks plus the markup symbols.
+/// Everything is read character by character, so no regex crate is needed.
+fn clean_inline_tts(raw: &str) -> String {
+    let mut src = raw;
+    let mut out = String::with_capacity(raw.len());
+    while !src.is_empty() {
+        if let Some(i) = src.find('[') {
+            out.push_str(&drop_markup(&src[..i]));
+            match src[i..].find(']') {
+                Some(j) => {
+                    let label = &src[i + 1..i + j];
+                    let after = &src[i + j + 1..];
+                    // "[label](url)" → label; a lone "[" → label without adornment.
+                    if let Some(after) = after.strip_prefix("(") {
+                        match after.find(')') {
+                            Some(k) => {
+                                out.push_str(&clean_inline_tts(label));
+                                out.push(' ');
+                                src = &after[k + 1..];
+                                continue;
+                            }
+                            None => {}
+                        }
+                    }
+                    out.push_str(&clean_inline_tts(label));
+                    out.push(' ');
+                    src = after;
+                }
+                None => {
+                    out.push_str(&drop_markup(&src[i..]));
+                    break;
+                }
+            }
+        } else {
+            out.push_str(&drop_markup(src));
+            break;
+        }
+    }
+    out.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+/// Remove the characters that mark bold/italic/strike/code/inline table cells.
+fn drop_markup(s: &str) -> String {
+    s.chars().filter(|c| !"`*_~|#>".contains(*c)).collect()
+}
+
+/// Synthesize the text with the selected TTS model into a WAV and ask QML to play it.
 ///
-/// Воркер не трогает аудио-устройство: piper пишет `/tmp/harbour-opencode-tts.wav`,
-/// воркер пушит строку `[[tts]]<путь>`, QML проигрывает её через MediaPlayer.
-/// Так не нужен cpal/Пульс в Rust-процессе, а сама озвучка не блокирует SSE-поток.
+/// The worker doesn't touch the audio device: piper writes `/tmp/harbour-opencode-tts.wav`,
+/// the worker pushes a `[[tts]]<path>` line, QML plays it via MediaPlayer.
+/// This way no cpal/PulseAudio is needed in the Rust process, and the playback itself doesn't block the SSE stream.
 pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
     let id = voice.tts_model.lock().map(|g| g.clone()).unwrap_or_default();
     if id.is_empty() {
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("{VOICE_PREFIX} сначала выберите TTS-модель в настройках"));
+            q.push(svc_line(now_ms(), crate::i18n::K_TTS_NO_MODEL_SELECTED, &[]));
         }
         return;
     }
@@ -847,17 +1031,21 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     };
     let Some((onnx, config)) = piper_files(model) else {
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("{VOICE_PREFIX} модель «{id}» не скачана: скачайте её в настройках"));
+            q.push(svc_line(now_ms(), crate::i18n::K_MODEL_NOT_DOWNLOADED, &[id]));
         }
         return;
     };
     if !std::path::Path::new(PIPER_BIN).exists() {
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("{VOICE_PREFIX} piper не установлен ({PIPER_BIN})"));
+            q.push(svc_line(
+                now_ms(),
+                crate::i18n::K_TTS_PIPER_MISSING,
+                &[PIPER_BIN.to_string()],
+            ));
         }
         return;
     }
-    let text = text.trim();
+    let text = strip_markdown_for_tts(text.trim());
     if text.is_empty() {
         return;
     }
@@ -867,13 +1055,13 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         text.len()
     );
 
-    // Текст отдаём piper в stdin, поэтому нужен piped stdin + запись.
+    // We feed the text to piper via stdin, hence piped stdin + write.
     use tokio::io::AsyncWriteExt;
     use tokio::process::Command;
     use std::process::Stdio;
 
     let mut child = match Command::new(PIPER_BIN)
-        .current_dir(PIPER_HOME) // чтобы espeak-ng-data нашёлся рядом с бинарём
+        .current_dir(PIPER_HOME) // so espeak-ng-data is found next to the binary
         .arg("-m")
         .arg(&onnx)
         .arg("-c")
@@ -888,8 +1076,9 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         Ok(c) => c,
         Err(e) => {
             log::error!("piper не запустился: {e}");
+            let emsg = e.to_string();
             if let Ok(mut q) = pending.lock() {
-                q.push(format!("{VOICE_PREFIX} ошибка запуска TTS: {e}"));
+                q.push(svc_line(now_ms(), crate::i18n::K_TTS_RUN_FAILED, &[emsg]));
             }
             return;
         }
@@ -907,12 +1096,12 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     if !out.status.success() {
         log::error!("piper: {}", String::from_utf8_lossy(&out.stderr));
         if let Ok(mut q) = pending.lock() {
-            q.push(format!("{VOICE_PREFIX} ошибка синтеза (см. лог)"));
+            q.push(svc_line(now_ms(), crate::i18n::K_TTS_RESULT_FAILED, &[]));
         }
         return;
     }
-    // Синтез завершён, но пользователь мог успеть нажать «стоп» — тогда
-    // результат не отдаём в очередь и чистим файл (если успели записать).
+    // Synthesis finished, but the user may have managed to press "stop" — then
+    // we don't enqueue the result and clean up the file (if it got written).
     if voice.cancel_tts.lock().map(|g| *g).unwrap_or(false) {
         log::info!("TTS: синтез отменён пользователем, файл не отдаю");
         let _ = std::fs::remove_file(&out_wav);
@@ -924,21 +1113,45 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     }
 }
 
-/// TTS-точка из QML: спонсит задачу озвучки указанного текста.
+/// TTS entry point from QML: spawns the playback task for the given text.
 pub async fn tts_from_call(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
     let voice2 = voice.clone();
     let pending2 = pending.clone();
     let text = text.to_string();
-    // Новый синтез = снимаем запрос отмены от предыдущего стопа.
+    // New synthesis = clear the cancel request left by the previous stop.
     if let Ok(mut c) = voice.cancel_tts.lock() {
         *c = false;
     }
     tokio::spawn(async move {
+        // Serialize the engines: wait while STT or another synthesis is running (they share
+        // the CPU, and two piper jobs would race on their output files). A fresh "stop"
+        // press aborts the queued synthesis instead of starting it later.
+        loop {
+            let busy = {
+                let stt = voice2.stt_busy.lock().map(|b| *b).unwrap_or(false);
+                let tts = voice2.tts_busy.lock().map(|b| *b).unwrap_or(false);
+                stt || tts
+            };
+            if !busy {
+                break;
+            }
+            if voice2.cancel_tts.lock().map(|c| *c).unwrap_or(false) {
+                log::info!("TTS: отменено во время ожидания");
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(120)).await;
+        }
+        if let Ok(mut b) = voice2.tts_busy.lock() {
+            *b = true;
+        }
         run_tts(&voice2, &text, &pending2).await;
+        if let Ok(mut b) = voice2.tts_busy.lock() {
+            *b = false;
+        }
     });
 }
 
-/// Обработать команды голосового модуля (из очереди QML).
+/// Handle voice module commands (from the QML queue).
 pub async fn run_command(
     voice: &Arc<VoiceState>,
     cmd: &Value,
@@ -980,7 +1193,7 @@ pub async fn run_command(
         }
         Some(Cmd::VoiceDownload) => {
             if let Some(id) = cmd["id"].as_str() {
-                // Параллельные скачивания разрешены: каждая модель качается в своём таске.
+                // Parallel downloads are allowed: each model downloads in its own task.
                 if id.is_empty() {
                     return;
                 }
@@ -1007,7 +1220,7 @@ pub async fn run_command(
                     .and_then(|x| x["name"].as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| id.clone());
                 if let Ok(mut q) = pending.lock() {
-                    q.push(format!("{VOICE_PREFIX} скачивание «{name}»…"));
+                    q.push(svc_line(now_ms(), crate::i18n::K_MODEL_DOWNLOADING, &[name]));
                 }
                 tokio::spawn(async move {
                     download_model(&voice2, &id, &cat, &pending2).await;
@@ -1015,7 +1228,7 @@ pub async fn run_command(
             }
         }
         Some(Cmd::VoiceDownloadCancel) => {
-            // Отменяем конкретную модель (по id), а не все разом.
+            // Cancel the specific model (by id), not all at once.
             if let Some(id) = cmd["id"].as_str() {
                 if !id.is_empty() {
                     if let Ok(mut c) = voice.cancel_dl.lock() {
@@ -1032,8 +1245,8 @@ pub async fn run_command(
                     Ok(()) => log::info!("модель {id} удалена ({})", dir.display()),
                     Err(e) => log::warn!("не удалилась {id}: {e}"),
                 }
-                // Если удалили выбранную модель — снимаем выбор и подбираем замену
-                // (чтобы юзер понимал, какой моделью теперь распознаёт/синтезирует).
+                // If the selected model was deleted — clear the selection and pick a replacement
+                // (so the user knows which model now does recognition/synthesis).
                 let cur = voice.stt_model.lock().map(|g| g.clone()).unwrap_or_default();
                 let cur2 = voice.tts_model.lock().map(|g| g.clone()).unwrap_or_default();
                 let mut note: Option<String> = None;
@@ -1043,8 +1256,8 @@ pub async fn run_command(
                         *g = repl.clone().unwrap_or_default();
                     }
                     note = Some(match repl {
-                        Some(r) => format!("{VOICE_PREFIX} выбрана STT-модель {r}"),
-                        None => format!("{VOICE_PREFIX} STT-моделей нет — скачайте новую"),
+                        Some(r) => svc_line(now_ms(), crate::i18n::K_STT_MODEL_SELECTED, &[r]),
+                        None => svc_line(now_ms(), crate::i18n::K_STT_MODELS_NONE, &[]),
                     });
                 }
                 if cur2 == id {
@@ -1053,8 +1266,8 @@ pub async fn run_command(
                         *g = repl.clone().unwrap_or_default();
                     }
                     note = match repl {
-                        Some(r) => Some(format!("{VOICE_PREFIX} выбрана TTS-модель {r}")),
-                        None => Some(format!("{VOICE_PREFIX} TTS-моделей нет — скачайте новую")),
+                        Some(r) => Some(svc_line(now_ms(), crate::i18n::K_TTS_MODEL_SELECTED, &[r])),
+                        None => Some(svc_line(now_ms(), crate::i18n::K_TTS_MODELS_NONE, &[])),
                     };
                 }
                 if let (Some(n), Ok(mut q)) = (note, pending.lock()) {
@@ -1067,9 +1280,9 @@ pub async fn run_command(
         Some(Cmd::VoiceRecordStart) => start_recording(voice).await,
         Some(Cmd::VoiceRecordStop) => {
             stop_recording(voice).await;
-            // подтверждаем завершение слушания коротким beep-сообщением
+            // Confirm the end of listening with a short status message.
             if let Ok(mut q) = pending.lock() {
-                q.push(format!("{VOICE_PREFIX} запись завершена"))
+                q.push(svc_line(now_ms(), crate::i18n::K_STT_RECORD_FINISHED, &[]))
             }
             stt_from_call(voice, pending).await;
         }
@@ -1095,39 +1308,47 @@ pub async fn run_command(
             }
         }
         Some(Cmd::VoiceTtsCancel) => {
-            // Отменить текущий синтез/очередь озвучки: run_tts проверит флаг
-            // после завершения piper и не отдаст WAV в очередь.
+            // Cancel the current synthesis/playback queue: run_tts checks the flag
+            // after piper finishes and won't enqueue the WAV.
             if let Ok(mut c) = voice.cancel_tts.lock() {
                 *c = true;
             }
             log::info!("TTS: отмена озвучки запрошена");
         }
         Some(Cmd::VoiceCatalogUpdate) => {
-            // Обновляем каталог моделей с GitHub; результат — строкой в чат
-            // (как и другие [голос]-уведомления воркера).
+            // Refresh the model catalog from GitHub; report the result as a
+            // chat line (like the other worker notifications).
             let pendant = pending.clone();
             let v = voice.clone();
             match update_catalog().await {
                 Ok((_version, count)) => {
                     v.refresh_status();
+                    let cnt = count.to_string();
                     if let Ok(mut q) = pendant.lock() {
-                        q.push(format!(
-                            "{VOICE_PREFIX} каталог моделей обновлён: моделей подходит {count}"
+                        q.push(svc_line(
+                            now_ms(),
+                            crate::i18n::K_CATALOG_REFRESHED,
+                            &[cnt],
                         ));
                     }
                 }
                 Err(e) => {
                     log::error!("обновление каталога: {e}");
+                    let emsg = e.to_string();
                     if let Ok(mut q) = pendant.lock() {
-                        q.push(format!("{VOICE_PREFIX} каталог не обновился: {e}"));
+                        q.push(svc_line(
+                            now_ms(),
+                            crate::i18n::K_CATALOG_REFRESH_FAILED,
+                            &[emsg],
+                        ));
                     }
                 }
             }
         }
-        // Не-голосовые команды сюда не должны попадать: их обрабатывает
-        // диспетчер в main.rs (там match по Cmd исчерпывающий — забыть
-        // вариант при расширении не выйдет). Здесь достаточно catch-all
-        // с логом, чтобы замечать случайный заход.
+        // Non-voice commands must not land here: they are handled by
+        // the dispatcher in main.rs (its match over Cmd is exhaustive — forgetting
+        // a variant when extending is impossible). A catch-all with a log
+        // is enough here to notice a stray entry.
         Some(action) => {
             log::warn!("voice::run_command: не-голосовая команда {action:?}");
         }

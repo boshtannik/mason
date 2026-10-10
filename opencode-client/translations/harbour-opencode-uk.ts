@@ -499,5 +499,97 @@ long press — remove</source>
         <source>Deny</source>
         <translation>Заборонити</translation>
     </message>
+    <message>
+        <source>Server error: %1</source>
+        <translation>Помилка сервера: %1</translation>
+    </message>
+    <message>
+        <source>Session error: %1</source>
+        <translation>Помилка сесії: %1</translation>
+    </message>
+    <message>
+        <source>Prompt error: %1</source>
+        <translation>Помилка промпту: %1</translation>
+    </message>
+    <message>
+        <source>Voice model "%1" downloaded</source>
+        <translation>Голосова модель «%1» завантажена</translation>
+    </message>
+    <message>
+        <source>Failed to download voice model "%1"</source>
+        <translation>Не вдалося завантажити голосову модель «%1»</translation>
+    </message>
+    <message>
+        <source>Select an STT model in settings first</source>
+        <translation>Спочатку оберіть STT-модель у налаштуваннях</translation>
+    </message>
+    <message>
+        <source>Model "%1" is not downloaded — download it in Settings</source>
+        <translation>Модель «%1» не завантажена — завантажте її в налаштуваннях</translation>
+    </message>
+    <message>
+        <source>Recognizing…</source>
+        <translation>Розпізнаю…</translation>
+    </message>
+    <message>
+        <source>Failed to launch STT: %1</source>
+        <translation>Помилка запуску STT: %1</translation>
+    </message>
+    <message>
+        <source>Speech recognition failed (see log)</source>
+        <translation>Помилка розпізнавання мови (див. лог)</translation>
+    </message>
+    <message>
+        <source>Nothing recognized</source>
+        <translation>Розпізнано порожньо</translation>
+    </message>
+    <message>
+        <source>Select a TTS model in settings first</source>
+        <translation>Спочатку оберіть TTS-модель у налаштуваннях</translation>
+    </message>
+    <message>
+        <source>piper is not installed (%1)</source>
+        <translation>piper не встановлено (%1)</translation>
+    </message>
+    <message>
+        <source>Failed to launch TTS: %1</source>
+        <translation>Помилка запуску TTS: %1</translation>
+    </message>
+    <message>
+        <source>Speech synthesis failed (see log)</source>
+        <translation>Помилка синтезу мови (див. лог)</translation>
+    </message>
+    <message>
+        <source>Downloading "%1"…</source>
+        <translation>Завантаження «%1»…</translation>
+    </message>
+    <message>
+        <source>STT model "%1" selected</source>
+        <translation>Вибрано STT-модель «%1»</translation>
+    </message>
+    <message>
+        <source>No STT models — download a new one</source>
+        <translation>STT-моделей немає — завантажте нову</translation>
+    </message>
+    <message>
+        <source>TTS model "%1" selected</source>
+        <translation>Вибрано TTS-модель «%1»</translation>
+    </message>
+    <message>
+        <source>No TTS models — download a new one</source>
+        <translation>TTS-моделей немає — завантажте нову</translation>
+    </message>
+    <message>
+        <source>Recording finished</source>
+        <translation>Запис завершено</translation>
+    </message>
+    <message>
+        <source>Voice model catalog updated: %1 models available</source>
+        <translation>Каталог моделей оновлено: підходить моделей %1</translation>
+    </message>
+    <message>
+        <source>Failed to update the model catalog: %1</source>
+        <translation>Не вдалося оновити каталог: %1</translation>
+    </message>
 </context>
 </TS>

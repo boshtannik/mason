@@ -1,9 +1,9 @@
 import QtQuick 2.6
 import Sailfish.Silica 1.0
 
-// Управление голосовыми моделями: две сворачиваемые секции
-// (распознавание / синтез), фильтр по языку, живой прогресс,
-// действия-иконки и удаление с подтверждением (RemorseItem).
+// Voice model management: two collapsible sections
+// (recognition / synthesis), a language filter, live progress,
+// icon actions and deletion with confirmation (RemorseItem).
 Page {
     id: vmPage
 
@@ -13,12 +13,12 @@ Page {
     property bool recExpanded: true
     property bool ttsExpanded: true
 
-    // Фингерпринт структурного состояния (БЕЗ счётчика прогресса):
-    // список пересобирается только когда меняется выбор/состояние/фильтр/секция,
-    // а не каждые 300 мс polling-а — скролл не сбрасывается во время скачивания.
+    // Fingerprint of the structural state (WITHOUT the progress counter):
+    // the list is rebuilt only when the selection/state/filter/section changes,
+    // not every 300 ms of polling — the scroll is not reset during a download.
     property string voiceFp: appWindow !== undefined ? vmPage.fingerprint() : ""
 
-    // Идентификаторы секций (локальные для страницы).
+    // Section identifiers (local to the page).
     readonly property string secOndevice: "ondevice"
     readonly property string secRecognition: "recognition"
     readonly property string secSynthesis: "synthesis"
@@ -64,10 +64,10 @@ Page {
         return m.lang_id === vmPage.filterLang
     }
 
-    // Предикат строк секций Recognition/Synthesis (единый для списка и счётчика).
-    // В режиме «Auto» секция предлагает только ещё не скачанные модели;
-    // при выборе конкретного языка — ВСЕ модели этого языка (скачанные тоже),
-    // чтобы язык не «исчезал» из раздела и модели можно было выбрать/удалить.
+    // Predicate for rows of the Recognition/Synthesis sections (shared by the list and the counter).
+    // In "Auto" mode the section offers only not-yet-downloaded models;
+    // when a specific language is selected — ALL models of that language (downloaded ones too),
+    // so the language doesn't "disappear" from the section and models can be selected/deleted.
     function storeRows(m, engine) {
         if (m.engine !== engine || !vmPage.visible(m))
             return false
@@ -146,7 +146,7 @@ Page {
         voiceModel.clear()
         var arr = appWindow.voiceModels || []
 
-        // 1. Скачанные модели (обе движка) — всегда без языкового фильтра.
+        // 1. Downloaded models (both engines) — always without a language filter.
         var ondev = vmPage.downloadedArr(arr)
         voiceModel.append({ isHeader: true, kind: vmPage.secOndevice,
                             title: qsTr("Downloaded models"),
@@ -157,7 +157,7 @@ Page {
             for (var i = 0; i < ondev.length; i++)
                 vmPage.appendRow(ondev[i])
 
-        // 2. Распознавание, 3. Синтез — только нескачанные, с фильтром по языку.
+        // 2. Recognition, 3. Synthesis — only not-yet-downloaded, with a language filter.
         vmPage.appendStore(arr, appWindow.engineStt, qsTr("Recognition"),
                            vmPage.secRecognition, vmPage.recExpanded)
         vmPage.appendStore(arr, appWindow.engineTts, qsTr("Synthesis"),
@@ -235,8 +235,8 @@ Page {
         if (dlstate === appWindow.stateDownloading) {
             appWindow.voiceCmd(appWindow.cmdDownloadCancel, modelId)
         } else if (downloaded) {
-            // RemorseItem.execute(item, text, callback) — первый аргумент
-            // владелец, «Removing…» показывается поверх его строки.
+            // RemorseItem.execute(item, text, callback) — the first argument is the
+            // owner, "Removing…" is shown over its row.
             remorse.execute(wdg, qsTr("Removing «%1»…").arg(name),
                             function() {
                 appWindow.voiceCmd(appWindow.cmdDelete, modelId)
@@ -287,7 +287,7 @@ Page {
                     }
                 }
                 onCurrentIndexChanged: {
-                    // Фильтр страницы — чисто UI: глобальный язык агента не меняем.
+                    // The page filter is pure UI: we do not change the global agent language.
                     var o = appWindow.voiceLangOptions
                     if (currentIndex < 0 || currentIndex >= o.length)
                         return

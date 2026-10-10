@@ -1,5 +1,5 @@
 #!/bin/sh
-# Перезапуск harbour-opencode на телефоне (dev-хелпер).
+# Restart harbour-opencode on the phone (dev helper).
 PW="${SFOS_PASS:?задайте SFOS_PASS (пароль devel-su)}"
 
 echo "=== 1. убиваем старые booster'ы (держат отравленный QML-кэш):"

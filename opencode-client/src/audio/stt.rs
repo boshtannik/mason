@@ -3,15 +3,15 @@ use std::process::Command;
 
 use thiserror::Error;
 
-/// Speech-to-Text через whisper.cpp CLI.
+/// Speech-to-Text via the whisper.cpp CLI.
 pub struct WhisperStt {
-    /// Путь к бинарнику `whisper-cli`.
+    /// Path to the `whisper-cli` binary.
     bin: PathBuf,
-    /// Путь к модели `ggml-*.bin`.
+    /// Path to the `ggml-*.bin` model.
     model: PathBuf,
-    /// Язык (`ru`, `en`, `auto` и т.д.).
+    /// Language (`ru`, `en`, `auto`, etc.).
     lang: String,
-    /// Количество потоков.
+    /// Number of threads.
     threads: usize,
 }
 
@@ -38,7 +38,7 @@ impl WhisperStt {
         self
     }
 
-    /// Распознать речь в WAV-файле. Возвращает текст.
+    /// Recognize speech in a WAV file. Returns the text.
     pub fn transcribe(&self, wav: impl AsRef<Path>) -> Result<String, SttError> {
         if !self.bin.exists() {
             return Err(SttError::NotFound(self.bin.clone()));
@@ -58,7 +58,7 @@ impl WhisperStt {
             return Err(SttError::Run(stderr.chars().take(200).collect()));
         }
 
-        // whisper-cli -nt выводит чистый текст (без таймкодов)
+        // whisper-cli -nt outputs clean text (without timestamps)
         let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
         Ok(text)
     }

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use crate::types::session::Session;
 use crate::types::tool::ToolState;
 
-/// Глобальное состояние приложения: что видит QML.
+/// Global application state: what QML sees.
 #[derive(Debug, Default)]
 pub struct AppState {
     pub sessions: HashMap<String, Session>,
@@ -31,7 +31,7 @@ impl AppState {
             .unwrap_or(&crate::types::session::SessionStatus::Idle)
     }
 
-    /// Последний текстовый контент активной сессии (для стриминга в QML).
+    /// Latest text content of the active session (for streaming to QML).
     pub fn active_text(&self) -> String {
         let id = match &self.active_session_id {
             Some(id) => id.clone(),

@@ -2,7 +2,7 @@ use crate::api::OpenCodeClient;
 use crate::types::event::PermissionReplyKind;
 
 impl OpenCodeClient {
-    /// POST /session/{sessionID}/permissions/{permissionID} — ответить на запрос разрешения.
+    /// POST /session/{sessionID}/permissions/{permissionID} — answer a permission request.
     pub async fn answer_permission(
         &self,
         session_id: &str,

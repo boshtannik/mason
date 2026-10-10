@@ -16,10 +16,10 @@ BuildRequires:  pkgconfig(Qt5Quick)
 BuildRequires:  pkgconfig(sailfishapp)
 BuildRequires:  qt5-qttools-linguist
 
-# НЕ давать rpmbuild урезать/стрипать бандл. brp-strip (и find-debuginfo)
-# обрезают не-аллоцированные секции Bun-бинаря opencode, после чего он
-# теряет встроенный CLI ("serve") и падает с "'Script not found serve'"
-# (--version вместо 1.18.30 показывает 1.3.14 — версию самой Bun). Поэтому:
+# Do NOT let rpmbuild trim/strip the bundle. brp-strip (and find-debuginfo)
+# trim the non-allocated sections of the Bun binary opencode, after which it
+# loses the built-in CLI ("serve") and fails with "'Script not found serve'"
+# (--version instead of 1.18.30 shows 1.3.14 — Bun's own version). Therefore:
 %global debug_package %{nil}
 %global __strip /bin/true
 
@@ -43,14 +43,14 @@ export CXX_aarch64_unknown_linux_gnu=aarch64-meego-linux-gnu-g++
 export AR_aarch64_unknown_linux_gnu=aarch64-meego-linux-gnu-ar
 case "$MODE" in
   release)
-    # Релиз: сжатый код и лучшая генерация — медленно, только для дистрибуции.
+    # Release: compressed code and better codegen — slow, for distribution only.
     export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now -Ccodegen-units=1 -Clink-arg=-rdynamic"
     export CARGO_INCREMENTAL=0
     export CARGO_TARGET_DIR=/home/mersdk/cargo-cache/cargo/release
     cargo build --release -j 1
     ;;
   *)
-    # Dev-сборка по умолчанию: без оптимизаций и заморозки codegen-units.
+    # Dev build by default: no optimizations and no codegen-units freezing.
     export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now -Clink-arg=-rdynamic"
     export CARGO_INCREMENTAL=1
     export CARGO_TARGET_DIR=/home/mersdk/cargo-cache/cargo/debug
@@ -58,7 +58,7 @@ case "$MODE" in
     ;;
 esac
 
-# whisper.cpp: статический бинарник whisper-cli (STT). Сборка без OpenBLAS/COREML.
+# whisper.cpp: static whisper-cli binary (STT). Built without OpenBLAS/COREML.
 cd ../third_party/whisper.cpp
 make -j1 \
   UNAME_M=generic \
@@ -68,12 +68,12 @@ make -j1 \
 test -x main
 ls -l main
 
-# Piper (TTS): проверка наличия эталонной aarch64-сборки в кэше (скачивает mbuild.sh).
+# Piper (TTS): check that the reference aarch64 build is present in the cache (downloaded by mbuild.sh).
 test -x /home/mersdk/cargo-cache/piper-aarch64/piper/piper
 ls -l /home/mersdk/cargo-cache/piper-aarch64/piper
 
-# Переводы: .ts → .qm для каждого полностью переведённого языка.
-# При добавлении нового языка (harbour-opencode-XX.ts) допиши его сюда.
+# Translations: .ts → .qm for each fully translated language.
+# When adding a new language (harbour-opencode-XX.ts), add it here.
 cd ../../opencode-client/translations
 for ts in harbour-opencode-ru.ts harbour-opencode-fi.ts harbour-opencode-uk.ts harbour-opencode-de.ts; do
   lrelease -qm "${ts%.ts}.qm" "$ts"
@@ -86,7 +86,7 @@ MODE="${MBUILD_MODE:-debug}"
 rm -rf %{buildroot}
 install -Dm 755 /home/mersdk/cargo-cache/cargo/$MODE/aarch64-unknown-linux-gnu/$MODE/harbour-opencode -t %{buildroot}%{_bindir}
 install -Dm 755 third_party/whisper.cpp/main %{buildroot}%{_libexecdir}/%{name}/whisper-cli
-# Piper: весь каталог целиком (бинарь + .so с RUNPATH=$ORIGIN + espeak-ng-data).
+# Piper: the whole directory (binary + .so with RUNPATH=$ORIGIN + espeak-ng-data).
 mkdir -p %{buildroot}%{_libexecdir}/%{name}/piper
 cp -a /home/mersdk/cargo-cache/piper-aarch64/piper/. %{buildroot}%{_libexecdir}/%{name}/piper/
 echo "OC-SRC md5: $(md5sum /home/mersdk/cargo-cache/opencode-cli/opencode)"
@@ -97,10 +97,10 @@ install -Dm 644 harbour-opencode.png -t %{buildroot}%{_datadir}/icons/hicolor/86
 install -Dm 644 harbour-opencode.desktop -t %{buildroot}%{_datadir}/applications
 install -d %{buildroot}%{_datadir}/%{name}
 cp -r opencode-client/qml %{buildroot}%{_datadir}/%{name}/qml
-# Переводы (.qm) для системной локали (устанавливает владельца/права install -m).
+# Translations (.qm) for the system locale (install -m sets owner/permissions).
 install -d %{buildroot}%{_datadir}/%{name}/translations
 install -m 644 opencode-client/translations/*.qm -t %{buildroot}%{_datadir}/%{name}/translations
-# do-probe.sh нужен исполняемым (при копировании бит не гарантируется).
+# do-probe.sh must be executable (the bit is not guaranteed on copy).
 chmod +x %{buildroot}%{_datadir}/%{name}/qml/do-probe.sh
 
 desktop-file-install --delete-original    \

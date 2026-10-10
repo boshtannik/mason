@@ -499,5 +499,97 @@ pitkä painallus — poista</translation>
         <source>Deny</source>
         <translation>Kiellä</translation>
     </message>
+    <message>
+        <source>Server error: %1</source>
+        <translation>Palvelinvirhe: %1</translation>
+    </message>
+    <message>
+        <source>Session error: %1</source>
+        <translation>Istuntovirhe: %1</translation>
+    </message>
+    <message>
+        <source>Prompt error: %1</source>
+        <translation>Prompt-virhe: %1</translation>
+    </message>
+    <message>
+        <source>Voice model "%1" downloaded</source>
+        <translation>Äänimalli "%1" ladattu</translation>
+    </message>
+    <message>
+        <source>Failed to download voice model "%1"</source>
+        <translation>Äänimallin "%1" lataus epäonnistui</translation>
+    </message>
+    <message>
+        <source>Select an STT model in settings first</source>
+        <translation>Valitse ensin STT-malli asetuksista</translation>
+    </message>
+    <message>
+        <source>Model "%1" is not downloaded — download it in Settings</source>
+        <translation>Mallia "%1" ei ole ladattu — lataa se asetuksista</translation>
+    </message>
+    <message>
+        <source>Recognizing…</source>
+        <translation>Tunnistan…</translation>
+    </message>
+    <message>
+        <source>Failed to launch STT: %1</source>
+        <translation>STT-käynnistys epäonnistui: %1</translation>
+    </message>
+    <message>
+        <source>Speech recognition failed (see log)</source>
+        <translation>Puheentunnistus epäonnistui (katso loki)</translation>
+    </message>
+    <message>
+        <source>Nothing recognized</source>
+        <translation>Ei tunnistettu mitään</translation>
+    </message>
+    <message>
+        <source>Select a TTS model in settings first</source>
+        <translation>Valitse ensin TTS-malli asetuksista</translation>
+    </message>
+    <message>
+        <source>piper is not installed (%1)</source>
+        <translation>piper ei ole asennettu (%1)</translation>
+    </message>
+    <message>
+        <source>Failed to launch TTS: %1</source>
+        <translation>TTS-käynnistys epäonnistui: %1</translation>
+    </message>
+    <message>
+        <source>Speech synthesis failed (see log)</source>
+        <translation>Puhesynteesi epäonnistui (katso loki)</translation>
+    </message>
+    <message>
+        <source>Downloading "%1"…</source>
+        <translation>Ladataan "%1"…</translation>
+    </message>
+    <message>
+        <source>STT model "%1" selected</source>
+        <translation>STT-malli "%1" valittu</translation>
+    </message>
+    <message>
+        <source>No STT models — download a new one</source>
+        <translation>Ei STT-malleja — lataa uusi</translation>
+    </message>
+    <message>
+        <source>TTS model "%1" selected</source>
+        <translation>TTS-malli "%1" valittu</translation>
+    </message>
+    <message>
+        <source>No TTS models — download a new one</source>
+        <translation>Ei TTS-malleja — lataa uusi</translation>
+    </message>
+    <message>
+        <source>Recording finished</source>
+        <translation>Äänitys valmis</translation>
+    </message>
+    <message>
+        <source>Voice model catalog updated: %1 models available</source>
+        <translation>Malliluettelo päivitetty: %1 mallia saatavilla</translation>
+    </message>
+    <message>
+        <source>Failed to update the model catalog: %1</source>
+        <translation>Luettelon päivitys epäonnistui: %1</translation>
+    </message>
 </context>
 </TS>

@@ -499,5 +499,97 @@ lang drücken — entfernen</translation>
         <source>Deny</source>
         <translation>Verweigern</translation>
     </message>
+    <message>
+        <source>Server error: %1</source>
+        <translation>Serverfehler: %1</translation>
+    </message>
+    <message>
+        <source>Session error: %1</source>
+        <translation>Sitzungsfehler: %1</translation>
+    </message>
+    <message>
+        <source>Prompt error: %1</source>
+        <translation>Promptfehler: %1</translation>
+    </message>
+    <message>
+        <source>Voice model "%1" downloaded</source>
+        <translation>Sprachmodell „%1“ heruntergeladen</translation>
+    </message>
+    <message>
+        <source>Failed to download voice model "%1"</source>
+        <translation>Fehler beim Herunterladen des Sprachmodells „%1“</translation>
+    </message>
+    <message>
+        <source>Select an STT model in settings first</source>
+        <translation>Wählen Sie zuerst ein STT-Modell in den Einstellungen</translation>
+    </message>
+    <message>
+        <source>Model "%1" is not downloaded — download it in Settings</source>
+        <translation>Modell „%1“ ist nicht heruntergeladen — laden Sie es in den Einstellungen</translation>
+    </message>
+    <message>
+        <source>Recognizing…</source>
+        <translation>Erkennung läuft…</translation>
+    </message>
+    <message>
+        <source>Failed to launch STT: %1</source>
+        <translation>Fehler beim Start des STT: %1</translation>
+    </message>
+    <message>
+        <source>Speech recognition failed (see log)</source>
+        <translation>Spracherkennung fehlgeschlagen (siehe Log)</translation>
+    </message>
+    <message>
+        <source>Nothing recognized</source>
+        <translation>Nichts erkannt</translation>
+    </message>
+    <message>
+        <source>Select a TTS model in settings first</source>
+        <translation>Wählen Sie zuerst ein TTS-Modell in den Einstellungen</translation>
+    </message>
+    <message>
+        <source>piper is not installed (%1)</source>
+        <translation>piper ist nicht installiert (%1)</translation>
+    </message>
+    <message>
+        <source>Failed to launch TTS: %1</source>
+        <translation>Fehler beim Start des TTS: %1</translation>
+    </message>
+    <message>
+        <source>Speech synthesis failed (see log)</source>
+        <translation>Sprachsynthese fehlgeschlagen (siehe Log)</translation>
+    </message>
+    <message>
+        <source>Downloading "%1"…</source>
+        <translation>Lade „%1“…</translation>
+    </message>
+    <message>
+        <source>STT model "%1" selected</source>
+        <translation>STT-Modell „%1“ ausgewählt</translation>
+    </message>
+    <message>
+        <source>No STT models — download a new one</source>
+        <translation>Keine STT-Modelle — laden Sie ein neues</translation>
+    </message>
+    <message>
+        <source>TTS model "%1" selected</source>
+        <translation>TTS-Modell „%1“ ausgewählt</translation>
+    </message>
+    <message>
+        <source>No TTS models — download a new one</source>
+        <translation>Keine TTS-Modelle — laden Sie ein neues</translation>
+    </message>
+    <message>
+        <source>Recording finished</source>
+        <translation>Aufnahme beendet</translation>
+    </message>
+    <message>
+        <source>Voice model catalog updated: %1 models available</source>
+        <translation>Modellkatalog aktualisiert: %1 Modelle verfügbar</translation>
+    </message>
+    <message>
+        <source>Failed to update the model catalog: %1</source>
+        <translation>Fehler beim Aktualisieren des Katalogs: %1</translation>
+    </message>
 </context>
 </TS>

@@ -5,7 +5,7 @@ use crate::audio::recorder::Recorder;
 use crate::audio::stt::{SttError, WhisperStt};
 use crate::audio::tts::{PiperTts, TtsError};
 
-/// Конфигурация голосового движка (STT + TTS) — пути и параметры.
+/// Voice engine configuration (STT + TTS) — paths and parameters.
 #[derive(Debug, Clone)]
 pub struct VoiceConfig {
     pub whisper_bin: PathBuf,
@@ -41,7 +41,7 @@ pub enum VoiceError {
     Play(#[from] crate::audio::player::PlayError),
 }
 
-/// Голосовой движок: запись + распознавание + синтез + воспроизведение.
+/// Voice engine: recording + recognition + synthesis + playback.
 pub struct VoiceEngine {
     cfg: VoiceConfig,
     recorder: Recorder,
@@ -53,9 +53,9 @@ impl VoiceEngine {
         Self { cfg, recorder: Recorder::new(), player: Player::new() }
     }
 
-    /// Распознать речь с микрофона за `secs` секунд → текст.
+    /// Recognize speech from the microphone for `secs` seconds → text.
     ///
-    /// Это блокирующая операция (аналоговый поток); в GUI звать через потоки.
+    /// This is a blocking operation (analog stream); in the GUI call it via threads.
     pub fn listen(&self, secs: u32, wav_tmp: impl Into<PathBuf>) -> Result<String, VoiceError> {
         let wav = wav_tmp.into();
         self.recorder.record(&wav, secs)?;
@@ -66,7 +66,7 @@ impl VoiceEngine {
         Ok(text)
     }
 
-    /// Синтезировать ответ и проиграть его (заблокироваться до конца воспроизведения).
+    /// Synthesize the response and play it (blocks until playback finishes).
     pub fn speak(&self, text: &str, wav_tmp: impl Into<PathBuf>) -> Result<(), VoiceError> {
         let wav = wav_tmp.into();
         let tts = PiperTts::new(&self.cfg.piper_bin, &self.cfg.piper_model, &self.cfg.piper_config);

@@ -525,5 +525,109 @@ long press — remove</source>
         <source>Deny</source>
         <translation>Запретить</translation>
     </message>
+    <message>
+        <source>Server error: %1</source>
+        <translation>Ошибка сервера: %1</translation>
+    </message>
+    <message>
+        <source>Session error: %1</source>
+        <translation>Ошибка сессии: %1</translation>
+    </message>
+    <message>
+        <source>Prompt error: %1</source>
+        <translation>Ошибка промпта: %1</translation>
+    </message>
+    <message>
+        <source>retrying</source>
+        <translation>повтор</translation>
+    </message>
+    <message>
+        <source>in %1 s</source>
+        <translation>через %1 с</translation>
+    </message>
+    <message>
+        <source>attempt #%1</source>
+        <translation>попытка #%1</translation>
+    </message>
+    <message>
+        <source>Voice model "%1" downloaded</source>
+        <translation>Голосовая модель «%1» скачана</translation>
+    </message>
+    <message>
+        <source>Failed to download voice model "%1"</source>
+        <translation>Не удалось скачать голосовую модель «%1»</translation>
+    </message>
+    <message>
+        <source>Select an STT model in settings first</source>
+        <translation>Сначала выберите STT-модель в настройках</translation>
+    </message>
+    <message>
+        <source>Model "%1" is not downloaded — download it in Settings</source>
+        <translation>Модель «%1» не скачана — скачайте её в настройках</translation>
+    </message>
+    <message>
+        <source>Recognizing…</source>
+        <translation>Распознаю…</translation>
+    </message>
+    <message>
+        <source>Failed to launch STT: %1</source>
+        <translation>Ошибка запуска STT: %1</translation>
+    </message>
+    <message>
+        <source>Speech recognition failed (see log)</source>
+        <translation>Ошибка распознавания речи (см. лог)</translation>
+    </message>
+    <message>
+        <source>Nothing recognized</source>
+        <translation>Распознано пусто</translation>
+    </message>
+    <message>
+        <source>Select a TTS model in settings first</source>
+        <translation>Сначала выберите TTS-модель в настройках</translation>
+    </message>
+    <message>
+        <source>piper is not installed (%1)</source>
+        <translation>piper не установлен (%1)</translation>
+    </message>
+    <message>
+        <source>Failed to launch TTS: %1</source>
+        <translation>Ошибка запуска TTS: %1</translation>
+    </message>
+    <message>
+        <source>Speech synthesis failed (see log)</source>
+        <translation>Ошибка синтеза речи (см. лог)</translation>
+    </message>
+    <message>
+        <source>Downloading "%1"…</source>
+        <translation>Скачивание «%1»…</translation>
+    </message>
+    <message>
+        <source>STT model "%1" selected</source>
+        <translation>Выбрана STT-модель «%1»</translation>
+    </message>
+    <message>
+        <source>No STT models — download a new one</source>
+        <translation>STT-моделей нет — скачайте новую</translation>
+    </message>
+    <message>
+        <source>TTS model "%1" selected</source>
+        <translation>Выбрана TTS-модель «%1»</translation>
+    </message>
+    <message>
+        <source>No TTS models — download a new one</source>
+        <translation>TTS-моделей нет — скачайте новую</translation>
+    </message>
+    <message>
+        <source>Recording finished</source>
+        <translation>Запись завершена</translation>
+    </message>
+    <message>
+        <source>Voice model catalog updated: %1 models available</source>
+        <translation>Каталог моделей обновлён: подходит моделей %1</translation>
+    </message>
+    <message>
+        <source>Failed to update the model catalog: %1</source>
+        <translation>Каталог не обновился: %1</translation>
+    </message>
 </context>
 </TS>

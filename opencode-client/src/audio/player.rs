@@ -6,7 +6,7 @@ use std::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use thiserror::Error;
 
-/// Воспроизведение WAV через `cpal` (ALSA на Sailfish) — без внешних бинарников.
+/// WAV playback via `cpal` (ALSA on Sailfish) — no external binaries.
 pub struct Player;
 
 #[derive(Debug, Error)]
@@ -28,7 +28,7 @@ impl Player {
         Self
     }
 
-    /// Воспроизвести WAV-файл. Возвращает после завершения.
+    /// Play a WAV file. Returns after completion.
     pub fn play(&self, wav: impl AsRef<Path>) -> Result<(), PlayError> {
         let mut reader = hound::WavReader::open(wav)?;
         let spec = reader.spec();
@@ -51,7 +51,7 @@ impl Player {
         let (tx, rx) = mpsc::channel::<f32>();
         let mut pos = 0usize;
         let samples_slice = samples;
-        // Льём сэмплы в канал из потока воспроизведения: читаем все сразу в память.
+        // Pour samples into the channel from the playback thread: read them all into memory at once.
         for s in samples_slice {
             let _ = tx.send(s);
             pos += 1;
@@ -79,7 +79,7 @@ impl Player {
         .map_err(|e| PlayError::StreamError(e.to_string()))?;
 
         stream.play().map_err(|e| PlayError::StreamError(e.to_string()))?;
-        // Ждём пока канал опустеет (все сэмплы отправлены -> проигрались).
+        // Wait for the channel to empty (all samples sent -> played).
         let empty_wait = Duration::from_secs_f32(
             pos as f32 / spec.sample_rate as f32 + 0.2,
         );

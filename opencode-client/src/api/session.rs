@@ -19,7 +19,7 @@ pub enum PromptPart {
 }
 
 impl OpenCodeClient {
-    /// POST /session -> создать новую сессию.
+    /// POST /session -> create a new session.
     pub async fn create_session(&self) -> Result<serde_json::Value, String> {
         let url = format!("{}/session", self.base);
         let resp = self
@@ -31,7 +31,7 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    /// GET /session -> список сессий (свежие обычно сверху).
+    /// GET /session -> session list (recent ones usually on top).
     pub async fn list_sessions(&self) -> Result<serde_json::Value, String> {
         let url = format!("{}/session", self.base);
         let resp = self
@@ -43,7 +43,7 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    /// PATCH /session/{id} -> переименовать сессию.
+    /// PATCH /session/{id} -> rename a session.
     pub async fn rename_session(&self, session_id: &str, title: &str) -> Result<(), String> {
         let url = format!("{}/session/{session_id}", self.base);
         let resp = self
@@ -58,7 +58,7 @@ impl OpenCodeClient {
         Ok(())
     }
 
-    /// DELETE /session/{id} -> удалить сессию.
+    /// DELETE /session/{id} -> delete a session.
     pub async fn delete_session(&self, session_id: &str) -> Result<(), String> {
         let url = format!("{}/session/{session_id}", self.base);
         let resp = self
@@ -72,7 +72,7 @@ impl OpenCodeClient {
         Ok(())
     }
 
-    /// GET /session/{id} -> одна сессия (в т.ч. `model.providerID`/`model.id`, `share.url`).
+    /// GET /session/{id} -> a single session (incl. `model.providerID`/`model.id`, `share.url`).
     pub async fn get_session(&self, session_id: &str) -> Result<serde_json::Value, String> {
         let url = format!("{}/session/{session_id}", self.base);
         let resp = self
@@ -84,7 +84,7 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    /// POST /session/{id}/fork -> новая сессия-ветка (тело `{messageID?}` опционально).
+    /// POST /session/{id}/fork -> a new branch session (body `{messageID?}` optional).
     pub async fn fork_session(&self, session_id: &str) -> Result<serde_json::Value, String> {
         let url = format!("{}/session/{session_id}/fork", self.base);
         let resp = self
@@ -96,7 +96,7 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    /// POST /session/{id}/share -> сессия со ссылкой в `share.url`.
+    /// POST /session/{id}/share -> session with a link in `share.url`.
     pub async fn share_session(&self, session_id: &str) -> Result<serde_json::Value, String> {
         let url = format!("{}/session/{session_id}/share", self.base);
         let resp = self
@@ -108,7 +108,7 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    /// DELETE /session/{id}/share -> снять доступ по ссылке.
+    /// DELETE /session/{id}/share -> revoke link access.
     pub async fn unshare_session(&self, session_id: &str) -> Result<(), String> {
         let url = format!("{}/session/{session_id}/share", self.base);
         let resp = self
@@ -122,7 +122,7 @@ impl OpenCodeClient {
         Ok(())
     }
 
-    /// POST /session/{id}/summarize -> сжать историю (нужны providerID и modelID сессии).
+    /// POST /session/{id}/summarize -> compact the history (needs the session's providerID and modelID).
     pub async fn summarize_session(
         &self,
         session_id: &str,
@@ -157,7 +157,7 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    /// GET /session/{id}/todo -> чеклист задач агента.
+    /// GET /session/{id}/todo -> the agent's task checklist.
     pub async fn session_todo(&self, session_id: &str) -> Result<serde_json::Value, String> {
         let url = format!("{}/session/{session_id}/todo", self.base);
         let resp = self
@@ -169,7 +169,7 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    /// POST /api/session/{id}/model -> переключить модель сессии.
+    /// POST /api/session/{id}/model -> switch the session model.
     pub async fn set_model(
         &self,
         session_id: &str,
@@ -191,9 +191,9 @@ impl OpenCodeClient {
         Ok(())
     }
 
-    /// POST /api/session/{id}/agent -> переключить агента сессии (Build/Plan).
-    /// Меняет алгоритм последующих ходов: build — активная работа
-    /// (файлы/команды), plan — планирование без изменений.
+    /// POST /api/session/{id}/agent -> switch the session agent (Build/Plan).
+    /// Changes the algorithm of subsequent turns: build — active work
+    /// (files/commands), plan — planning without changes.
     pub async fn set_session_agent(&self, session_id: &str, agent: &str) -> Result<(), String> {
         let url = format!("{}/api/session/{session_id}/agent", self.base);
         let resp = self
@@ -220,13 +220,15 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    /// POST /session/{id}/prompt_async — отправить промпт, не ждать ответа (SSE принесёт результат).
-    pub async fn prompt_async(&self, session_id: &str, text: &str) -> Result<(), String> {
+    /// POST /session/{id}/prompt_async — send a prompt without waiting for a response (SSE will deliver the result).
+    /// `agent` (build/plan) must be passed on every prompt: without it the server
+    /// resets the session agent to the default ("build"), which silently disables plan mode.
+    pub async fn prompt_async(&self, session_id: &str, text: &str, agent: Option<String>) -> Result<(), String> {
         let url = format!("{}/session/{session_id}/prompt_async", self.base);
         let body = PromptBody {
             messageID: None,
             model: None,
-            agent: None,
+            agent,
             parts: vec![PromptPart::Text { text: text.to_string() }],
         };
         let resp = self
@@ -241,7 +243,7 @@ impl OpenCodeClient {
         Ok(())
     }
 
-    /// POST /session/{id}/abort — прервать выполнение.
+    /// POST /session/{id}/abort — abort execution.
     pub async fn abort(&self, session_id: &str) -> Result<bool, String> {
         let url = format!("{}/session/{session_id}/abort", self.base);
         let resp = self.authed(self.http.post(&url)).send().await.map_err(|e| e.to_string())?;

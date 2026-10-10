@@ -4,7 +4,7 @@ use std::io::Write;
 
 use thiserror::Error;
 
-/// Text-to-Speech через Piper CLI.
+/// Text-to-Speech via the Piper CLI.
 pub struct PiperTts {
     bin: PathBuf,
     model: PathBuf,
@@ -26,7 +26,7 @@ impl PiperTts {
         Self { bin: bin.into(), model: model.into(), config: config.into() }
     }
 
-    /// Синтезировать текст → WAV-файл (с заголовком).
+    /// Synthesize text → WAV file (with a header).
     pub fn synthesize_to_wav(&self, text: &str, out_path: impl AsRef<Path>) -> Result<PathBuf, TtsError> {
         if !self.bin.exists() {
             return Err(TtsError::NotFound(self.bin.clone()));

@@ -7,11 +7,11 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::WavWriter;
 use thiserror::Error;
 
-/// Целевая частота дискретизации для STT.
+/// Target sample rate for STT.
 const TARGET_RATE: u32 = 16_000;
 const CHANNELS: u16 = 1;
 
-/// Запись звука с микрофона через `cpal` (ALSA на Sailfish) — без внешних бинарников.
+/// Microphone audio recording via `cpal` (ALSA on Sailfish) — no external binaries.
 pub struct Recorder {
     default_secs: u32,
 }
@@ -38,7 +38,7 @@ impl Recorder {
         self
     }
 
-    /// Записать `duration_secs` секунд с микрофона в WAV-файл (16kHz mono s16).
+    /// Record `duration_secs` seconds from the microphone into a WAV file (16kHz mono s16).
     pub fn record(&self, path: impl AsRef<Path>, duration_secs: u32) -> Result<PathBuf, RecordError> {
         let host = cpal::default_host();
         let device = host
@@ -83,23 +83,23 @@ impl Recorder {
 
         stream.play().map_err(|e| RecordError::StreamError(e.to_string()))?;
 
-        // Собираем сэмплы заданное время.
+        // Collect samples for the specified time.
         let mut buf: Vec<f32> = Vec::with_capacity((src_rate as usize) * duration_secs as usize);
         let start = std::time::Instant::now();
         while start.elapsed() < Duration::from_secs(duration_secs as u64) {
             while let Ok(s) = rx.try_recv() {
                 buf.push(s);
             }
-            // Русская дон-'t-пустой-loop.
+            // Avoid an empty spin loop.
             thread::yield_now();
         }
         drop(stream);
-        // Добираем остаток из канала.
+        // Drain the remainder from the channel.
         while let Ok(s) = rx.try_recv() {
             buf.push(s);
         }
 
-        // Ресемплинг усреднением групп: src_rate -> 16k.
+        // Resampling by averaging groups: src_rate -> 16k.
         let ratio = src_rate as f32 / TARGET_RATE as f32;
         let group = ratio.max(1.0).round() as usize;
 
@@ -126,7 +126,7 @@ impl Recorder {
         Ok(out)
     }
 
-    /// Записать с дефолтной длительностью.
+    /// Record with the default duration.
     pub fn record_default(&self, path: impl AsRef<Path>) -> Result<PathBuf, RecordError> {
         self.record(path, self.default_secs)
     }

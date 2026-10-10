@@ -492,5 +492,109 @@ long press — remove</source>
         <source>Deny</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Server error: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session error: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Prompt error: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>retrying</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>in %1 s</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>attempt #%1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice model "%1" downloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to download voice model "%1"</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select an STT model in settings first</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Model "%1" is not downloaded — download it in Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recognizing…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to launch STT: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speech recognition failed (see log)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing recognized</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a TTS model in settings first</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>piper is not installed (%1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to launch TTS: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speech synthesis failed (see log)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Downloading "%1"…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>STT model "%1" selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No STT models — download a new one</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TTS model "%1" selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No TTS models — download a new one</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recording finished</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice model catalog updated: %1 models available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to update the model catalog: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 </TS>

@@ -3,14 +3,14 @@ use serde::Deserialize;
 use super::message::{Message, Part};
 use super::session::{Session, SessionStatus, Todo};
 
-/// Событие с /global/event (SSE). Документация: @opencode-ai/sdk@1.18.31, GlobalEvent.
+/// Event from /global/event (SSE). Documentation: @opencode-ai/sdk@1.18.31, GlobalEvent.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GlobalEvent {
     pub payload: Event,
 }
 
-/// Официальный union событий opencode 1.18.31 (89 прямых + sync-агрегаты).
-/// Полный, без Unknown-фолбэка: match'и по нему обязаны быть исчерпывающими.
+/// Official opencode 1.18.31 event union (89 direct + sync aggregates).
+/// Complete, without an Unknown fallback: matches on it must be exhaustive.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum Event {
@@ -284,7 +284,7 @@ pub enum Event {
     #[serde(rename = "server.instance.disposed")]
     ServerInstanceDisposed { properties: ServerInstanceDisposedProperties },
 
-    /// Агрегирующий (репликационный) канал: type "sync" с вложенным syncEvent.
+    /// Aggregating (replication) channel: type "sync" with a nested syncEvent.
     #[serde(rename = "sync")]
     Sync {
         #[serde(rename = "syncEvent")]
@@ -292,7 +292,7 @@ pub enum Event {
     },
 }
 
-/// Вложенное событие агрегата (sync). type имеет суффикс по версии (например `.1`).
+/// Nested event of the aggregate (sync). type has a version suffix (e.g. `.1`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum SyncEvent {
@@ -368,7 +368,7 @@ pub enum SyncEvent {
     SessionNextRevertCommitted(SyncData<SessionNextRevertCommittedProperties>),
 }
 
-/// Тело sync-события: метаданные агрегата + data (как properties у прямого события).
+/// Body of a sync event: aggregate metadata + data (like properties for a direct event).
 #[derive(Debug, Clone, Deserialize)]
 pub struct SyncData<T> {
     pub id: String,
@@ -404,6 +404,7 @@ pub struct MessageRemovedProperties {
 pub struct MessagePartUpdatedProperties {
     pub sessionID: String,
     pub part: Part,
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub time: f64,
 }
 
@@ -423,6 +424,7 @@ pub struct ModelRef {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextAgentSwitchedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub messageID: String,
@@ -431,6 +433,7 @@ pub struct SessionNextAgentSwitchedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextModelSwitchedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub messageID: String,
@@ -445,6 +448,7 @@ pub struct LocationRef {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextMovedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub location: LocationRef,
@@ -465,6 +469,7 @@ pub enum PromptDelivery {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextPromptedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub messageID: String,
@@ -474,6 +479,7 @@ pub struct SessionNextPromptedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextMessageTextProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub messageID: String,
@@ -482,6 +488,7 @@ pub struct SessionNextMessageTextProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextShellStartedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub messageID: String,
@@ -491,6 +498,7 @@ pub struct SessionNextShellStartedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextShellEndedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub callID: String,
@@ -499,6 +507,7 @@ pub struct SessionNextShellEndedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextStepStartedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -523,10 +532,12 @@ pub struct StepTokenCache {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextStepEndedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
     pub finish: String,
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub cost: f64,
     pub tokens: StepTokenUsage,
     pub snapshot: Option<String>,
@@ -535,15 +546,17 @@ pub struct SessionNextStepEndedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextStepFailedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
     pub error: serde_json::Value,
 }
 
-/// Объект для text.started / reasoning.started: показывается сразу после старта.
+/// Object for text.started / reasoning.started: shown right after the start.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextPartLifecycleProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -553,6 +566,7 @@ pub struct SessionNextPartLifecycleProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextTextDeltaProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -562,6 +576,7 @@ pub struct SessionNextTextDeltaProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextTextEndedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -571,6 +586,7 @@ pub struct SessionNextTextEndedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextReasoningDeltaProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -580,6 +596,7 @@ pub struct SessionNextReasoningDeltaProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextReasoningEndedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -589,6 +606,7 @@ pub struct SessionNextReasoningEndedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextToolInputStartedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -598,6 +616,7 @@ pub struct SessionNextToolInputStartedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextToolInputDeltaProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -607,6 +626,7 @@ pub struct SessionNextToolInputDeltaProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextToolInputEndedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -622,6 +642,7 @@ pub struct ToolProvider {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextToolCalledProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -633,6 +654,7 @@ pub struct SessionNextToolCalledProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextToolProgressProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -643,6 +665,7 @@ pub struct SessionNextToolProgressProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextToolSuccessProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -656,6 +679,7 @@ pub struct SessionNextToolSuccessProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextToolFailedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub assistantMessageID: String,
@@ -667,6 +691,7 @@ pub struct SessionNextToolFailedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextRetriedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub attempt: u64,
@@ -682,6 +707,7 @@ pub enum CompactionReason {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextCompactionStartedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub messageID: String,
@@ -690,6 +716,7 @@ pub struct SessionNextCompactionStartedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextCompactionDeltaProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub messageID: String,
@@ -698,6 +725,7 @@ pub struct SessionNextCompactionDeltaProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextCompactionEndedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub messageID: String,
@@ -708,6 +736,7 @@ pub struct SessionNextCompactionEndedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextRevertStagedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub revert: serde_json::Value,
@@ -715,12 +744,14 @@ pub struct SessionNextRevertStagedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextRevertClearedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionNextRevertCommittedProperties {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub timestamp: f64,
     pub sessionID: String,
     pub messageID: String,
@@ -764,10 +795,10 @@ pub struct SessionErrorProperties {
     pub error: Option<serde_json::Value>,
 }
 
-/// Превращает серверную ошибку (`properties.error`) в человекочитаемое
-/// сообщение для ленты чата. Типы ошибок — дискриминируемый union
-/// `{name, data}` из OpenAPI-спеки сервера (`/doc`), см. типы SDK.
-/// Если `error` отсутствует — пустая строка (игнорируем событие).
+/// Turns a server error (`properties.error`) into a human-readable
+/// message for the chat feed. Error types — a discriminated union
+/// `{name, data}` from the server's OpenAPI spec (`/doc`), see the SDK types.
+/// If `error` is absent — an empty string (we ignore the event).
 pub fn human_session_error(error: Option<&serde_json::Value>) -> String {
     let Some(e) = error else { return String::new() };
     let name = e.pointer("/name").and_then(|v| v.as_str()).unwrap_or("");
@@ -798,7 +829,7 @@ pub fn human_session_error(error: Option<&serde_json::Value>) -> String {
                 .pointer("/data/isRetryable")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            // 401/402/429 — квоты/доступ; остальное — сторонний инцидент.
+            // 401/402/429 — quotas/access; the rest — a third-party incident.
             let tag = match status_code {
                 401 | 402 | 429 => "ошибка доступа".to_string(),
                 _ if !data_message.is_empty() => "ошибка провайдера".to_string(),
@@ -816,7 +847,7 @@ pub fn human_session_error(error: Option<&serde_json::Value>) -> String {
             } else {
                 s.push_str(&data_message);
             }
-            // Детали обычно в `responseBody` (напр. «ограничение снимется в 14:32»).
+            // Details are usually in `responseBody` (e.g. "the limit resets at 14:32").
             if let Some(body) = e.pointer("/data/responseBody").and_then(|v| v.as_str()) {
                 let body = body.trim();
                 if !body.is_empty() && !body.contains(data_message.trim()) {
@@ -847,7 +878,7 @@ pub fn human_session_error(error: Option<&serde_json::Value>) -> String {
             }
         }
         _ => {
-            // Незнакомый тип — отдаём сырой объект (для отладки новых полей).
+            // Unknown type — return the raw object (for debugging new fields).
             if let Some(e) = e.as_object() {
                 serde_json::to_string(e).unwrap_or_else(|_| "ошибка сервера".into())
             } else if !name.is_empty() {
@@ -1087,8 +1118,11 @@ pub struct CommandExecutedProperties {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProjectTime {
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub created: f64,
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
     pub updated: f64,
+    #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64_opt")]
     pub initialized: Option<f64>,
 }
 
@@ -1194,8 +1228,8 @@ pub struct ServerInstanceDisposedProperties {
 }
 
 impl Event {
-    /// Ид + текст накопленной текстовой части (message.part.updated, text).
-    /// Единственный исчерпывающий match; перечисляем все варианты без catch-all.
+    /// Id + text of the accumulated text part (message.part.updated, text).
+    /// The only exhaustive match; we list all variants without a catch-all.
     pub fn text_part(&self) -> Option<(&str, &str, String)> {
         match self {
             Event::MessagePartUpdated { properties } => match &properties.part {
@@ -1307,9 +1341,9 @@ impl Event {
         }
     }
 
-    /// Ид + текст накопленной части «мышления» (message.part.updated, reasoning).
-    /// Рассуждения модели приходят как обычные части (как и text), а не как
-    /// `session.next.reasoning.delta`; их текст в реплэе полный, по part.id.
+    /// Id + text of the accumulated "thinking" part (message.part.updated, reasoning).
+    /// Model reasoning arrives as regular parts (just like text), not as
+    /// `session.next.reasoning.delta`; its text in the replay is complete, by part.id.
     pub fn reasoning_part(&self) -> Option<(&str, &str, String)> {
         match self {
             Event::MessagePartUpdated { properties } => match &properties.part {
@@ -1421,7 +1455,7 @@ impl Event {
         }
     }
 
-    /// messageID, если событие — обновление ассистентского сообщения.
+    /// messageID if the event is an assistant message update.
     pub fn assistant_message_id(&self) -> Option<&str> {
         match self {
             Event::MessageUpdated { properties } => match &properties.info {
@@ -1520,7 +1554,7 @@ impl Event {
         }
     }
 
-    /// sessionID, если сессия ушла в idle (session.idle).
+    /// sessionID if the session went idle (session.idle).
     pub fn idle_session_id(&self) -> Option<&str> {
         match self {
             Event::SessionIdle { properties } => Some(properties.sessionID.as_str()),

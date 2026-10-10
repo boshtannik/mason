@@ -7,9 +7,9 @@ Item {
 
     property var appWindow
 
-    readonly property bool busy: appWindow.statusText === "busy"
+    readonly property bool busy: appWindow.statusBase(appWindow.statusText) === "busy"
 
-    // ms (unix) → «HH:MM» местного времени.
+    // ms (unix) → "HH:MM" local time.
     function tsLabel(ms) {
         if (!ms)
             return ""
@@ -18,9 +18,9 @@ Item {
         return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m
     }
 
-    // ── Мини-markdown → HTML (Text.RichText) ──────────────────────────────
-    // Без сторонних библиотек: заголовки, списки, цитаты, жирный/курсив,
-    // инлайновый код и fenced-блоки ```. Рендер базовый, но читабельный.
+    // ── Mini-markdown → HTML (Text.RichText) ──────────────────────────────
+    // No third-party libraries: headings, lists, quotes, bold/italic,
+    // inline code and ``` fenced blocks. Rendering is basic but readable.
 
     function mdEscape(s) {
         return String(s)
@@ -29,9 +29,9 @@ Item {
             .replace(/>/g, "&gt;")
     }
 
-    // Инлайновая разметка одной строки (после escape, без новострок).
+    // Inline markup of a single line (after escaping, no newlines).
     function mdInline(s) {
-        // [text](url "title") → ссылка; код; жирный; курсив (*…* и _…_).
+        // [text](url "title") → link; code; bold; italic (*…* and _…_).
         s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g,
                       '<a href="$2" color="#82c4ff">$1</a>')
         s = s.replace(/`([^`]+)`/g, "<font face='monospace' color='#e0e0e0'>$1</font>")
@@ -41,7 +41,7 @@ Item {
         return s
     }
 
-    // Блоки по строкам: заголовки, списки, цитаты, разделители, fenced-код.
+    // Block-level per line: headings, lists, quotes, rules, fenced code.
     function mdBlock(s) {
         var out = []
         var lines = s.split("\n")
@@ -52,8 +52,8 @@ Item {
             var fence = /^```([\w+-]*)\s*$/.exec(l)
             if (fence) {
                 if (inPre) {
-                    // Переносы внутри <pre> сохраняются дословно (Qt RichText),
-                    // пробелы/отступы кода не схлопываются, шрифт моноширинный.
+                    // Line breaks inside <pre> are preserved verbatim (Qt RichText),
+                    // code spaces/indentation are not collapsed, the font is monospace.
                     out.push("<pre>" + preBuf.join("\n") + "</pre>")
                     preBuf = []
                     inPre = false
@@ -121,9 +121,9 @@ Item {
         VerticalScrollDecorator {}
     }
 
-    // Dev-кнопка генерации мок-ошибок сервера: чтобы проверять отображение
-    // ошибок в ленте без реального сервера (see bridge.mock_error).
-    // Скрыта — в боевом интерфейсе не нужна.
+    // Dev button that generates mock server errors: to test how errors
+    // are displayed in the feed without a real server (see bridge.mock_error).
+    // Hidden — not needed in the production UI.
     IconButton {
         id: mockErrBtn
         visible: false
@@ -143,8 +143,8 @@ Item {
         }
     }
 
-    // Dev-панель: кнопки выбора мок-ошибки. Если не все умещаются —
-    // прокручивается внутри (SilicaFlickable + VerticalScrollDecorator).
+    // Dev panel: buttons to pick a mock error. If not all fit —
+    // it scrolls inside (SilicaFlickable + VerticalScrollDecorator).
     Rectangle {
         id: mockErrPanel
         visible: false
@@ -152,7 +152,7 @@ Item {
         width: Math.min(parent.width - 2 * Theme.horizontalPageMargin,
                         Theme.itemSizeLarge * 7)
         height: Math.min(Theme.itemSizeMedium * 6 + Theme.paddingSmall * 5
-                         + 2 * Theme.paddingMedium,   // полная высота списка
+                         + 2 * Theme.paddingMedium,   // full height of the list
                          parent.height * 0.5)
         radius: Theme.paddingMedium
         color: Theme.rgba(Theme.overlayBackgroundColor, 0.92)
@@ -209,7 +209,7 @@ Item {
                     text: "UnknownError"
                     onClicked: { appWindow.mockServerError("UnknownError"); mockErrPanel.visible = false }
                 }
-                // Разделитель перед «нестандартными» событиями.
+                // Separator before the "non-standard" events.
                 Rectangle {
                     width: parent.width
                     height: 1
@@ -240,29 +240,36 @@ Item {
         Item {
             id: line
             width: chatList.width
-            // «Мышление» модели: биндинг на переключатель «показывать мышление»
-            // скрывает/показывает уже отрисованные строки [[think]] сразу, без
-            // переоткрытия сессии (новые при выключенной настройке не копятся —
-            // их отсекает poll() в корневом QML).
+            // Model "thinking": a binding to the "show thinking" switch
+            // hides/shows already rendered [[think]] lines at once, without
+            // reopening the session (new ones are not accumulated when the setting is off —
+            // poll() in the root QML filters them out).
             visible: appWindow.showReasoning || !line.isThink
             height: visible ? bubble.height + Theme.paddingSmall : 0
 
-            // Сырая строка от воркера: `[[t:<ms>]]>>> текст` (юзер) или
-            // `[[t:<ms>]]текст` (агент); живой юзер от `send()` — `[[t:<ms>]]>>> текст`.
+            // Raw line from the worker: `[[t:<ms>]]>>> text` (user) or
+            // `[[t:<ms>]]text` (agent); a live user line from `send()` — `[[t:<ms>]]>>> text`.
             property string raw: "" + modelData
             property string tsMs: {
                 var m = appWindow.tsRe.exec(line.raw)
                 return m ? m[1] : ""
             }
-            // Юзер-строки помечены префиксом «>>> » ПОСЛЕ таймстампа.
+            // User lines are marked with the ">>> " prefix AFTER the timestamp.
             property bool isUser: appWindow.lineIs(appWindow.stripTs(line.raw),
                                                   appWindow.kUserPrefix)
-            // «Мышление» модели: строка `[[t:<ms>]][[think]]<text>` перед ответом.
-            // Рендерится утопленным курсивом; озвучка/кнопка для неё недоступны.
+            // Model "thinking": the line `[[t:<ms>]][[think]]<text>` before the answer.
+            // Rendered as recessed italic; TTS/the button are unavailable for it.
             property bool isThink: appWindow.lineIs(appWindow.stripTs(line.raw),
                                                    appWindow.kThinkTag)
-            // Ошибка сервера (лимит, доступ к ИИ и т.п.) — отображается красноватым.
-            property bool isError: appWindow.lineIs(line.raw, appWindow.kErrPrefix)
+            // Server/service error (limits, AI access, etc.) — red-ish bubble.
+            // Worker sends `[[e:KEY…]]`; QML stores the line as `[[e]]<text>`.
+            property bool isError: appWindow.lineIs(appWindow.stripTs(line.raw),
+                                                    appWindow.kErrTag)
+            // Service notice (voice/STT/TTS/catalog progress) — a SYSTEM bubble:
+            // muted styling, no speak button, no auto-TTS (never an answer).
+            property bool isSvc: appWindow.lineIs(appWindow.stripTs(line.raw),
+                                                 appWindow.kSvcTag)
+            property bool isSystem: line.isError || line.isSvc
             property string body: {
                 var b = appWindow.stripTs(line.raw)
                 if (appWindow.lineIs(b, appWindow.kThinkTag))
@@ -270,14 +277,16 @@ Item {
                 if (appWindow.lineIs(b, appWindow.kUserPrefix))
                     b = b.substring(appWindow.kUserPrefix.length)
                 if (line.isError)
-                    b = b.replace(appWindow.errRe, "")
+                    b = b.substring(appWindow.kErrTag.length)
+                if (line.isSvc)
+                    b = b.substring(appWindow.kSvcTag.length)
                 return b.replace(/^\n+/, "")
             }
             readonly property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
-            // Ширина нижней строки: время + (для агента) кнопка озвучки + отступы.
+            // Width of the bottom line: time + (for the agent) the TTS button + padding.
             readonly property real footW: {
                 var w = tsLabel.implicitWidth
-                if (!line.isUser && !line.isThink && line.tsMs !== ""
+                if (!line.isUser && !line.isSystem && line.tsMs !== ""
                         && appWindow.ttsModelReady && appWindow.ttsMode !== "off")
                     w += Theme.itemSizeMedium + Theme.paddingSmall
                 return w
@@ -292,7 +301,9 @@ Item {
                           ? Theme.highlightColor
                           : (line.isError
                              ? Qt.rgba(0.85, 0.15, 0.15, 0.18)
-                             : Theme.rgba(Theme.primaryColor, 0.12)))
+                             : (line.isSvc
+                                ? Theme.rgba(Theme.secondaryColor, 0.10)
+                                : Theme.rgba(Theme.primaryColor, 0.12))))
                 width: Math.min(line.maxW,
                                 Math.max(textLabel.implicitWidth,
                                          line.footW + 2 * Theme.paddingSmall)
@@ -316,10 +327,11 @@ Item {
                     onLinkActivated: Qt.openUrlExternally(link)
                     font.pixelSize: Theme.fontSizeSmall
                     font.italic: line.isThink
-                    color: line.isThink ? Theme.secondaryColor : Theme.primaryColor
+                    color: (line.isThink || line.isSvc)
+                           ? Theme.secondaryColor : Theme.primaryColor
                 }
-                // Нижняя строка: время (+ для агента кнопка озвучки).
-                // Прижата к своему краю баббла, с отступами от краёв.
+                // Bottom line: time (+ the TTS button for the agent).
+                // Pinned to its own bubble edge, with padding from the edges.
                 Row {
                     id: footRow
                     visible: line.tsMs !== ""
@@ -330,16 +342,16 @@ Item {
                     y: textLabel.y + textLabel.height + Theme.paddingSmall
                     spacing: Theme.paddingMedium
 
-                    // 🔊 озвучить этот баббл: только ответы агента (не-user).
-                    // Hit-область — полный размер иконок `iconSizeMedium`, чтобы
-                    // лёгко попадать пальцем.
-                    // Когда синтезируется/озвучивается ИМЕННО ЭТОТ баббл — кнопка
-                    // превращается в «стоп» (иконка stop + лоадер во время синтеза),
-                    // чтобы прерывать озвучку прямо на самом баббле, а не отдельной
-                    // кнопкой снизу.
+                    // 🔊 speak this bubble: agent answers only (not user).
+                    // Hit area — the full `iconSizeMedium` icon size, so
+                    // it is easy to hit with a finger.
+                    // When THIS VERY bubble is being synthesised/spoken, the button
+                    // turns into "stop" (stop icon + loader during synthesis),
+                    // so TTS can be interrupted right on the bubble itself, not via a separate
+                    // button below.
                     IconButton {
                         id: speakBtn
-                        visible: !line.isUser && !line.isThink
+                        visible: !line.isUser && !line.isSystem
                                  && appWindow.ttsModelReady
                                  && appWindow.ttsMode !== "off"
                         width: visible ? Theme.itemSizeMedium : 0
@@ -350,7 +362,7 @@ Item {
                                      ? "image://theme/icon-m-stop"
                                      : "image://theme/icon-m-speaker-on"
                         highlighted: active
-                        // Пока синтез речи этого баббла — лоадер вместо иконки.
+                        // While this bubble is being synthesised — a loader instead of the icon.
                         BusyIndicator {
                             anchors.centerIn: parent
                             running: visible
@@ -384,23 +396,23 @@ Item {
             right: parent.right
             bottom: parent.bottom
         }
-        // Один уровень ввода: высота панели = высота одной строки кнопок.
+        // Single input level: the panel height = the height of one row of buttons.
         height: Theme.itemSizeMedium + Theme.paddingMedium
 
-        // ── Константные раскладки панели ввода ──────────────────────────────
-        // Вариантов мало — задаём каждый явно через State (анкеры), без
-        // вычисления координат (расстановка «плавающими» X ломалась).
+        // ── Fixed input panel layouts ──────────────────────────────────────
+        // There are few variants — we define each explicitly via State (anchors), without
+        // computing coordinates (laying out with "floating" X used to break).
         //  - text:      [input, send]
         //  - ptt left:  [mic, input, send]
         //  - ptt center:[input, mic, send]
-        //  - ptt right: [input, mic, send]  (mic у кнопки send)
-        //  - voice left/center/right: [mic, send] / [mic·центр, send] / [mic, send]
+        //  - ptt right: [input, mic, send]  (mic next to the send button)
+        //  - voice left/center/right: [mic, send] / [mic·center, send] / [mic, send]
         property string layoutKey: {
             if (appWindow.inputMode === "voice")
                 return "voice" + appWindow.pttPosition
             if (appWindow.inputMode === "text")
                 return "text"
-            // В режиме «текст + диктовка» центр недопустим (только слева/справа).
+            // In "text + dictation" mode the center is not allowed (only left/right).
             if (appWindow.pttPosition === "center")
                 return "pttleft"
             return "ptt" + appWindow.pttPosition
@@ -504,19 +516,19 @@ Item {
             width: Theme.itemSizeMedium
             height: Theme.itemSizeMedium
             anchors.verticalCenter: inputPanel.verticalCenter
-            // Горизонтальную привязку задаёт только state (left/центр/right),
-            // чтобы не возникало конфликта анкеров при центровке.
+            // The horizontal anchor is set only by state (left/center/right),
+            // so that no anchor conflict arises when centering.
             icon.source: (appWindow.recording || appWindow.recognizing)
                           ? "" : "image://theme/icon-m-mic"
 
-            // Лоадер вместо иконки, пока идёт запись или распознавание.
+            // A loader instead of the icon while recording or recognising.
             BusyIndicator {
                 anchors.fill: parent
                 running: appWindow.recording || appWindow.recognizing
                 visible: running
             }
 
-            // PTT-холд: зажал → запись, отпустил → стоп + распознавание.
+            // PTT hold: pressed → recording, released → stop + recognition.
             MouseArea {
                 anchors.fill: parent
                 onPressed: appWindow.startPttHold()
@@ -562,16 +574,16 @@ Item {
             visible: appWindow.inputMode !== "voice"
             enabled: !chatPage.busy
             background: null
-            // Плейсхолдер рисуем внутри поля, а не «этажом» сверху — иначе
-            // поле выглядит двухуровневым.
+            // We draw the placeholder inside the field, not as a layer on top — otherwise
+            // the field looks two-level.
             labelVisible: false
             verticalAlignment: Text.AlignVCenter
             horizontalAlignment: Text.AlignLeft
-            // Одна строка той же высоты, что и кнопки: низ в один уровень.
+            // One line of the same height as the buttons: the bottom aligns to one level.
             height: Theme.itemSizeMedium
             anchors.verticalCenter: inputPanel.verticalCenter
-            // Дефолтные анкеры (ширина в стартовой раскладке [input, send]);
-            // state переопределяет их под выбранную схему.
+            // Default anchors (width in the initial layout [input, send]);
+            // the state overrides them for the chosen scheme.
             anchors.left: inputPanel.left
             anchors.leftMargin: Theme.paddingSmall
             anchors.right: send.left

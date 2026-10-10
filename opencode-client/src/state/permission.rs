@@ -1,6 +1,6 @@
 use crate::types::Permission;
 
-/// Очередь запросов разрешений, ждущих ответа пользователя.
+/// Queue of permission requests waiting for a user response.
 #[derive(Debug, Default)]
 pub struct PermissionQueue {
     pub pending: Vec<Permission>,

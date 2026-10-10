@@ -25,6 +25,7 @@ pub enum Message {
         providerID: String,
         mode: String,
         path: AssistantPath,
+        #[serde(default, deserialize_with = "crate::types::deserialize_lenient_f64")]
         cost: f64,
         tokens: MessageTokens,
         finish: Option<String>,
@@ -79,7 +80,7 @@ pub enum MessageError {
     Api { data: serde_json::Value },
 }
 
-/// Часть сообщения (часть потока).
+/// Message part (stream part).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum Part {

@@ -6,8 +6,8 @@ Item {
 
     property var appWindow
 
-    // Синхронизация дропдауна позиции PTT. Биндинг currentIndex ломается
-    // при ручном выборе пункта меню, поэтому индекс ставим явно.
+    // Syncing the PTT position dropdown. The currentIndex binding breaks
+    // on manual menu item selection, so we set the index explicitly.
     readonly property var pttPositions: ["left", "center", "right"]
     function syncPttCombo() {
         var v = pttPosCombo.available
@@ -48,12 +48,12 @@ Item {
                     var v = ["text", "text_ptt", "voice"]
                     if (currentIndex >= 0 && currentIndex < v.length) {
                         appWindow.inputMode = v[currentIndex]
-                        // Для text_ptt кнопка диктовки может быть только слева
-                        // или справа от инпута — центр недопустим.
+                        // For text_ptt the dictation button can only be on the
+                        // left or right of the input — the center is not allowed.
                         if (v[currentIndex] === "text_ptt"
                             && appWindow.pttPosition === "center")
                             appWindow.pttPosition = "left"
-                        // Дропдаун позиции PTT пересчитывает доступные пункты.
+                        // The PTT position dropdown recomputes the available items.
                         globalSettingsPage.syncPttCombo()
                     }
                 }
@@ -62,7 +62,7 @@ Item {
             ComboBox {
                 id: pttPosCombo
                 label: qsTr("PTT button position")
-                // Центр доступен только в режиме «Только диктовка».
+                // Center is available only in "Dictation only" mode.
                 property var available: appWindow.inputMode === "voice"
                                         ? globalSettingsPage.pttPositions
                                         : ["left", "right"]
@@ -71,7 +71,7 @@ Item {
                     MenuItem { text: qsTr("Left") }
                     MenuItem {
                         text: qsTr("Center")
-                        // В text_ptt центр недопустим — прячем пункт.
+                        // In text_ptt the center is not allowed — hide the item.
                         visible: appWindow.inputMode === "voice"
                     }
                     MenuItem { text: qsTr("Right") }
@@ -123,7 +123,7 @@ Item {
                 font.pixelSize: Theme.fontSizeExtraSmall
             }
 
-            // — Диктовка: отдельная секция про отправку распознанного текста.
+            // — Dictation: a separate section about sending recognized text.
             SectionHeader { text: qsTr("Dictation") }
 
             TextSwitch {
@@ -132,8 +132,8 @@ Item {
                 onCheckedChanged: appWindow.sendImmediately = checked
             }
 
-            // — Автоозвучка ответов - отдельная секция. Доступна только когда
-            // скачана и выбрана модель синтеза речи; иначе — подсказка.
+            // — Auto-TTS of answers - a separate section. Available only when
+            // a speech synthesis model is downloaded and selected; otherwise — a hint.
             SectionHeader { text: qsTr("Voice answers") }
 
             Label {
@@ -246,7 +246,7 @@ Item {
                                                          qsTr("Test notification"))
             }
 
-            // Язык интерфейса — системный; переводы подгружаются нативно (.qm).
+            // The UI language is the system one; translations are loaded natively (.qm).
         }
 
         VerticalScrollDecorator {}

@@ -10,22 +10,22 @@ use tokio::time::sleep;
 
 use crate::api::OpenCodeClient;
 
-/// RAII-владелец процесса `opencode serve`.
+/// RAII owner of the `opencode serve` process.
 ///
-/// - `start()` — поднимает сервер в конструкторе
-/// - `Drop` — останавливает сервер (kill), когда владелец умирает
+/// - `start()` — starts the server in the constructor
+/// - `Drop` — stops the server (kill) when the owner dies
 ///
-/// Конфликт портов решён: `port = 0` (по умолчанию) — сервер сам
-/// выбирает свободный порт, мы читаем его из лога. Другой opencode
-/// на телефоне не пересекается.
+/// Port conflict solved: `port = 0` (default) — the server picks
+/// a free port itself, we read it from the log. Another opencode
+/// on the phone doesn't collide.
 pub struct ServerConfig {
-    /// Порт. 0 = авто-подбор (по умолчанию).
+    /// Port. 0 = auto-select (default).
     pub port: u16,
-    /// Бинарник opencode ($OPENCODE_BIN → which).
+    /// opencode binary ($OPENCODE_BIN → which).
     pub bin: Option<std::path::PathBuf>,
-    /// Доп. аргументы (--pure для работы без плагинов).
+    /// Extra arguments (--pure to run without plugins).
     pub args: Vec<String>,
-    /// Рабочая директория для opencode serve (cwd). По умолчанию $HOME/mason
+    /// Working directory for opencode serve (cwd). Defaults to $HOME/mason
     pub cwd: Option<PathBuf>,
 }
 
@@ -48,10 +48,10 @@ pub struct ServerGuard {
 }
 
 impl ServerGuard {
-    /// Запускает `opencode serve`, читает из лога назначенный порт,
-    /// ждёт health-ответа и возвращает готовый guard (RAII).
+    /// Starts `opencode serve`, reads the assigned port from the log,
+    /// waits for a health response and returns a ready guard (RAII).
     pub async fn start(cfg: ServerConfig) -> Result<Self, String> {
-        // Сначала прибираем наши сироты от прошлых аварийных запусков.
+        // First clean up our orphans from previous crash runs.
         reap_orphans();
 
         let bin = resolve_bin(cfg.bin);
@@ -85,11 +85,11 @@ impl ServerGuard {
         let mut child = cmd.spawn().map_err(|e| {
             format!("не удалось запустить `{}`: {e}", bin.display())
         })?;
-        // Запоминаем свой PID: только эти процессы мы вправе останавливать.
+        // Remember our PID: only these processes we are allowed to stop.
         let pid = child.id();
         register_spawn(pid);
 
-        // std::sync::mpsc — меж-поточный, без tokio runtime.
+        // std::sync::mpsc — inter-thread, without a tokio runtime.
         let (tx, rx) = mpsc::channel::<String>();
 
         if let Some(out) = child.stdout.take() {
@@ -102,7 +102,7 @@ impl ServerGuard {
         }
         drop(tx);
 
-        // Ждём строку "listening on http://127.0.0.1:PORT".
+        // Wait for the line "listening on http://127.0.0.1:PORT".
         let mut port: Option<u16> = None;
         const MAX_ATTEMPTS: u32 = 50;
         for _i in 0..MAX_ATTEMPTS {
@@ -137,14 +137,14 @@ impl ServerGuard {
         let base = format!("http://127.0.0.1:{port}");
         let auth = None;
 
-        // Фоновый сборщик логов.
+        // Background log collector.
         tokio::spawn(async move {
             while let Ok(line) = rx.recv() {
                 debug!("[opencode-bg] {line}");
             }
         });
 
-        // Ждём health.
+        // Wait for health.
         let client = OpenCodeClient::new(base.clone(), auth.clone());
         let mut ready = false;
         for _ in 0..100 {
@@ -204,14 +204,14 @@ impl Drop for ServerGuard {
     }
 }
 
-// --- Учёт поднятых нами `opencode serve` ----------------------------------
+// --- Tracking of `opencode serve` servers we spawned ----------------------
 //
-// mapplauncherd-booster иногда убивает приложение так, что `Drop` не
-// выполняется, и `opencode serve` остаётся висеть сиротой. Чтобы при
-// следующем старте прибрать ИМЕННО СВОИ процессы (и никогда не тронуть
-// `opencode`, запущенный пользователем из терминала), ведём реестр:
-//   pid + время старта из /proc/<pid>/stat (защита от переиспользования PID).
-// Файл: $XDG_DATA_HOME/harbour-opencode/spawned-servers.tsv
+// mapplauncherd-booster sometimes kills the app in a way that `Drop` doesn't
+// run, and `opencode serve` remains hanging as an orphan. To clean up
+// EXACTLY OUR processes on the next start (and never touch
+// `opencode` launched by the user from a terminal), we keep a registry:
+//   pid + start time from /proc/<pid>/stat (protection against PID reuse).
+// File: $XDG_DATA_HOME/harbour-opencode/spawned-servers.tsv
 
 extern "C" {
     fn kill(pid: i32, sig: i32) -> i32;
@@ -231,12 +231,12 @@ fn registry_path() -> std::path::PathBuf {
     base.join("harbour-opencode").join("spawned-servers.tsv")
 }
 
-/// Поле 22 `starttime` из /proc/<pid>/stat (в тиках). `None`, если процесса нет.
+/// Field 22 `starttime` from /proc/<pid>/stat (in ticks). `None` if the process doesn't exist.
 fn proc_start_time(pid: u32) -> Option<u64> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // comm заключён в скобки и может содержать ')' — режем по ПОСЛЕДНЕЙ ')'.
+    // comm is wrapped in parentheses and may contain ')' — split at the LAST ')'.
     let after = stat.rsplit_once(')')?.1;
-    // После comm поле state — это 3-е поле, значит starttime (22) — 20-е здесь.
+    // After comm, the state field is the 3rd field, so starttime (22) is the 20th here.
     after.split_whitespace().nth(19)?.parse().ok()
 }
 
@@ -244,7 +244,7 @@ fn proc_alive(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
-/// Действительно ли по PID сейчас `opencode ... serve` (доп. страховка).
+/// Whether the PID currently is really `opencode ... serve` (extra safety).
 fn is_opencode_serve(pid: u32) -> bool {
     match std::fs::read(format!("/proc/{pid}/cmdline")) {
         Ok(bytes) => {
@@ -305,7 +305,7 @@ fn unregister_spawn(pid: u32) {
     }
 }
 
-/// Останавливает только НАШИ осиротевшие серверы из реестра.
+/// Stops only OUR orphaned servers from the registry.
 fn reap_orphans() {
     let records = read_registry();
     if records.is_empty() {
@@ -313,7 +313,7 @@ fn reap_orphans() {
     }
     let mut alive = Vec::new();
     for (pid, start) in records {
-        // Мёртвый или переиспользованный PID — просто забываем.
+        // Dead or reused PID — just forget it.
         if proc_start_time(pid) != Some(start) {
             continue;
         }
@@ -330,8 +330,8 @@ fn reap_orphans() {
     write_registry(&alive);
 }
 
-/// Ищет бинарь opencode. Приоритет: явный путь → OPENCODE_BIN → bundled в RPM
-/// (наш, изолированный) → привычные системные места → PATH.
+/// Finds the opencode binary. Priority: explicit path → OPENCODE_BIN → bundled in the RPM
+/// (ours, isolated) → usual system locations → PATH.
 fn resolve_bin(explicit: Option<std::path::PathBuf>) -> std::path::PathBuf {
     if let Some(b) = explicit {
         return b;
