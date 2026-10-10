@@ -16,6 +16,8 @@ use opencode_client::event;
 use opencode_client::i18n::{self, err_line, now_ms, svc_line};
 use opencode_client::markers::*;
 use opencode_client::server;
+use opencode_client::settings::Settings;
+use opencode_client::types::event::PermissionReplyKind;
 use opencode_client::voice;
 
 /// The only QML file of the application (located in /usr/share/harbour-opencode/qml).
@@ -88,6 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let voice = voice::VoiceState::with_status(bridge_pinned.borrow().voice_status_handle());
     let tools = bridge_pinned.borrow().tools_handle();
     let permissions = bridge_pinned.borrow().permissions_handle();
+    let questions = bridge_pinned.borrow().questions_handle();
     let settings = bridge_pinned.borrow().settings_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
 
@@ -115,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_voice = voice.clone();
     let worker_tools = tools.clone();
     let worker_permissions = permissions.clone();
-    let worker_settings = settings.clone();
+    let worker_questions = questions.clone();
     let worker_url_tx = url_tx.clone();
     let worker_dispatcher = dispatcher.clone();
     let worker_base = env_base.clone();
@@ -130,13 +133,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .build()
                 .expect("tokio runtime");
             rt.block_on(async move {
-                let st = load_settings();
-                let workdir = st
-                    .get("workdir")
-                    .and_then(|v| v.as_str())
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| default_workdir().to_string_lossy().to_string());
-                let cwd = std::path::PathBuf::from(workdir);
+                let st = Settings::load();
+                let cwd = std::path::PathBuf::from(&st.workdir);
                 let _ = std::fs::create_dir_all(&cwd);
                 let guard = server::ServerGuard::start(server::ServerConfig { cwd: Some(cwd), ..Default::default() }).await;
                 let base = match &guard {
@@ -169,6 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_voice,
                         worker_tools,
                         worker_permissions,
+                        worker_questions,
                         worker_settings,
                         worker_stop_rx,
                     )
@@ -228,6 +227,7 @@ async fn run_worker(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
+    questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
 ) {
@@ -254,6 +254,7 @@ async fn run_worker(
                 voice.clone(),
                 tools.clone(),
                 permissions.clone(),
+                questions.clone(),
                 settings.clone(),
             ) => {
                 match r {
@@ -286,6 +287,7 @@ async fn run_stream(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
+    questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
 ) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
@@ -318,6 +320,11 @@ async fn run_stream(
     // trailing deltas) and the static `[[think]]` line is NOT duplicated.
     // TTS does not read reasoning: auto-TTS takes only the answer text.
     let mut reasonings: std::collections::HashMap<String, String> = Default::default();
+    // Reasoning part.ids in ARRIVAL ORDER. A single model turn may contain several
+    // reasoning blocks (think → tool → think): the map above can't keep the
+    // sequence, and sorting values alphabetically would shuffle them. Each block
+    // is rendered as its OWN [[think]] bubble — see the idle handler below.
+    let mut reasoning_order: Vec<String> = Vec::new();
     // part.id of parts confirmed to be `type:"reasoning"` (via message.part.updated).
     // Needed to route `message.part.delta` (which carries only partID + field) to
     // the right accumulator instead of the text one.
@@ -406,7 +413,9 @@ async fn run_stream(
                         if let Some((mid, id, text)) = ev.payload.reasoning_part() {
                             if assistant_messages.contains(mid) {
                                 reasoning_part_ids.insert(id.to_string());
-                                reasonings.insert(id.to_string(), text.clone());
+                                if reasonings.insert(id.to_string(), text.clone()).is_none() {
+                                    reasoning_order.push(id.to_string());
+                                }
                                 if live_reasoned_ids.contains(id) && !text.trim().is_empty() {
                                     if let Ok(mut q) = worker_pending.lock() {
                                         let body =
@@ -451,23 +460,27 @@ async fn run_stream(
                                 let text: String = ans.iter().map(|s| s.as_str()).collect();
                                 if !text.trim().is_empty() {
                                     log::info!("push answer: {:?}", text);
-                                    // Reasoning (if model sent it) — normally streamed
-                                    // live as [[thinklive]] (the bubble is already in
-                                    // place), so only push the static [[think]] line when
-                                    // it was NOT streamed live (e.g. no deltas arrived).
-                                    // Never both — the bubble would be duplicated.
-                                    let mut rea: Vec<&String> = reasonings.values().collect();
-                                    rea.sort();
-                                    let reasoning: String =
-                                        rea.iter().map(|s| s.as_str()).collect();
-                                    let streamed_live =
-                                        reasonings.keys().any(|id| live_reasoned_ids.contains(id));
-                                    if !reasoning.trim().is_empty() && !streamed_live {
-                                        log::info!("push reasoning: {} chars", reasoning.chars().count());
-                                        if let Ok(mut q) = worker_pending.lock() {
-                                            let body =
-                                                format!("{THINK_TAG}{}", reasoning.trim_end());
-                                            q.push(proto_line(now_ms(), &body));
+                                    // Reasoning: each block is its OWN [[think]] bubble.
+                                    // Blocks streamed live already have their bubble in
+                                    // the feed (grown via [[thinklive]]), so only blocks
+                                    // that never produced a live delta are pushed here —
+                                    // in arrival order, so several blocks neither collapse
+                                    // into one nor get duplicated.
+                                    for rid in &reasoning_order {
+                                        if let Some(rea) = reasonings.get(rid) {
+                                            if !rea.trim().is_empty()
+                                                && !live_reasoned_ids.contains(rid)
+                                            {
+                                                log::info!(
+                                                    "push reasoning block: {} chars",
+                                                    rea.chars().count()
+                                                );
+                                                if let Ok(mut q) = worker_pending.lock() {
+                                                    let body =
+                                                        format!("{THINK_TAG}{}", rea.trim_end());
+                                                    q.push(proto_line(now_ms(), &body));
+                                                }
+                                            }
                                         }
                                     }
                                     if let Ok(mut q) = worker_pending.lock() {
@@ -487,6 +500,7 @@ async fn run_stream(
                                 set_status(&status, "idle");
                                 parts.clear();
                                 reasonings.clear();
+                                reasoning_order.clear();
                                 reasoning_part_ids.clear();
                                 live_reasoned_ids.clear();
                                 last_reasoning_push = 0;
@@ -508,20 +522,15 @@ async fn run_stream(
 
                 // Commands from QML: new / open / rename / delete (JSON).
                 for raw in commands.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
-                    let cmd: serde_json::Value = match serde_json::from_str(&raw) {
-                        Ok(v) => v,
+                    let command: Cmd = match serde_json::from_str(&raw) {
+                        Ok(c) => c,
                         Err(e) => {
                             log::error!("command not JSON: {e}: {raw}");
                             continue;
                         }
                     };
-                    let raw_cmd = cmd["cmd"].as_str().unwrap_or("");
-                    let action: Option<Cmd> = cmd
-                        .get("cmd")
-                        .and_then(|c| serde_json::from_value(c.clone()).ok());
-                    let sid = cmd["id"].as_str().unwrap_or("");
-                    match action {
-                        Some(Cmd::New) => match client.create_session().await {
+                    match &command {
+                        Cmd::New => match client.create_session().await {
                             Ok(sess) => match sess["id"].as_str() {
                                 Some(id) => {
                                     log::info!("new session: {id}");
@@ -529,6 +538,8 @@ async fn run_stream(
                                     persist_last_session(Some(id));
                                     parts.clear();
                                     assistant_messages.clear();
+                                    reasonings.clear();
+                                    reasoning_order.clear();
                                     clear_tools(&dispatcher, &tools).await;
                                     refresh_sessions(&client, &sessions).await;
                                     set_current_session(&current_session_shared, &current_session);
@@ -540,33 +551,37 @@ async fn run_stream(
                             },
                             Err(e) => log::error!("new_session: {e}"),
                         },
-                        Some(Cmd::Open) => {
-                            if sid.is_empty() {
+                        Cmd::Open { id } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            log::info!("open session: {sid}");
-                            current_session = Some(sid.to_string());
-                            persist_last_session(Some(sid));
+                            log::info!("open session: {id}");
+                            current_session = Some(id.to_string());
+                            persist_last_session(Some(id.as_str()));
                             parts.clear();
                             assistant_messages.clear();
+                            reasonings.clear();
+                            reasoning_order.clear();
                             clear_tools(&dispatcher, &tools).await;
-                            load_history(&client, sid, &worker_pending).await;
+                            load_history(&client, id, &worker_pending).await;
                             set_status(&status, "idle");
                             set_current_session(&current_session_shared, &current_session);
-                            refresh_todo(&client, sid, &todos).await;
+                            refresh_todo(&client, id, &todos).await;
                         }
-                        Some(Cmd::Fork) => {
-                            if sid.is_empty() {
+                        Cmd::Fork { id } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            match client.fork_session(sid).await {
+                            match client.fork_session(id).await {
                                 Ok(sess) => match sess["id"].as_str() {
                                     Some(new_id) => {
-                                        log::info!("fork {sid} -> {new_id}");
+                                        log::info!("fork {id} -> {new_id}");
                                         current_session = Some(new_id.to_string());
                                         persist_last_session(Some(new_id));
                                         parts.clear();
                                         assistant_messages.clear();
+                                        reasonings.clear();
+                                        reasoning_order.clear();
                                         clear_tools(&dispatcher, &tools).await;
                                         load_history(&client, new_id, &worker_pending).await;
                                         refresh_sessions(&client, &sessions).await;
@@ -580,7 +595,7 @@ async fn run_stream(
                             }
                         }
                         #[cfg(debug_assertions)]
-                        Some(Cmd::MockPermission) => {
+                        Cmd::MockPermission => {
                             let mut st = dispatcher.lock().await;
                             st.permissions.push(opencode_client::types::Permission {
                                 id: format!("mock-perm-{}", std::time::SystemTime::now()
@@ -596,76 +611,91 @@ async fn run_stream(
                             drop(st);
                             refresh_permissions_json(&dispatcher, &permissions).await;
                         }
-                        Some(Cmd::Permission) => {
-                            let session_id = cmd["session"].as_str().unwrap_or("");
-                            let pid = cmd["id"].as_str().unwrap_or("");
-                            if session_id.is_empty() || pid.is_empty() {
+                        Cmd::Permission { session, id, response } => {
+                            if session.is_empty() || id.is_empty() {
                                 continue;
                             }
                             // Mock permission doesn't exist on server — just remove from queue.
                             // (This branch is only in debug build; no point looking for mock-session in release.)
                             #[cfg(debug_assertions)]
-                            if session_id == "mock-session" {
+                            if session == "mock-session" {
                                 let mut st = dispatcher.lock().await;
-                                st.permissions.pop(pid);
+                                st.permissions.pop(id);
                                 drop(st);
                                 refresh_permissions_json(&dispatcher, &permissions).await;
-                                log::info!("permission mock {pid} removed from queue");
+                                log::info!("permission mock {id} removed from queue");
                                 continue;
                             }
-                            let kind = match cmd["response"].as_str() {
-                                Some("once") => Some(opencode_client::types::event::PermissionReplyKind::Once),
-                                Some("always") => Some(opencode_client::types::event::PermissionReplyKind::Always),
-                                Some("reject") => Some(opencode_client::types::event::PermissionReplyKind::Reject),
-                                _ => None,
-                            };
-                            match kind {
-                                Some(kind) => match client.answer_permission(session_id, pid, &kind).await {
-                                    Ok(true) => log::info!("permission {session_id}/{pid} -> {kind:?}"),
-                                    Ok(false) => log::warn!("permission {session_id}/{pid}: сервер не принял ответ"),
-                                    Err(e) => log::error!("answer_permission: {e}"),
-                                },
-                                None => log::warn!("permission: unknown response {}", cmd["response"]),
+                            match client.answer_permission(session, id, response).await {
+                                Ok(true) => log::info!("permission {session}/{id} -> {response:?}"),
+                                Ok(false) => log::warn!("permission {session}/{id}: сервер не принял ответ"),
+                                Err(e) => log::error!("answer_permission: {e}"),
                             }
                         }
-                        Some(Cmd::Share) => {
-                            if sid.is_empty() {
+                        Cmd::Question { id, answers, reject } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            match client.share_session(sid).await {
+                            let result = if *reject {
+                                client.reject_question(id).await
+                            } else {
+                                client.answer_question(id, answers.clone()).await
+                            };
+                            match result {
+                                Ok(accepted) => {
+                                    if accepted {
+                                        log::info!("question {id} answered");
+                                    } else {
+                                        log::warn!("question {id}: сервер не принял ответ");
+                                    }
+                                    // Drop it from the queue right away; the
+                                    // question.replied/rejected event also does this.
+                                    let mut st = dispatcher.lock().await;
+                                    st.questions.pop(id);
+                                    drop(st);
+                                    refresh_questions_json(&dispatcher, &questions).await;
+                                }
+                                Err(e) => log::error!("question {id}: {e}"),
+                            }
+                        }
+                        Cmd::Share { id } => {
+                            if id.is_empty() {
+                                continue;
+                            }
+                            match client.share_session(id).await {
                                 Ok(sess) => {
                                     let url = sess["share"]["url"].as_str().unwrap_or("");
-                                    log::info!("share {sid} -> {url}");
+                                    log::info!("share {id} -> {url}");
                                     refresh_sessions(&client, &sessions).await;
                                 }
                                 Err(e) => log::error!("share_session: {e}"),
                             }
                         }
-                        Some(Cmd::Unshare) => {
-                            if sid.is_empty() {
+                        Cmd::Unshare { id } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            match client.unshare_session(sid).await {
+                            match client.unshare_session(id).await {
                                 Ok(()) => {
-                                    log::info!("unshare {sid}");
+                                    log::info!("unshare {id}");
                                     refresh_sessions(&client, &sessions).await;
                                 }
                                 Err(e) => log::error!("unshare_session: {e}"),
                             }
                         }
-                        Some(Cmd::Summarize) => {
-                            if sid.is_empty() {
+                        Cmd::Summarize { id } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            match client.get_session(sid).await {
+                            match client.get_session(id).await {
                                 Ok(s) => {
                                     let provider = s["model"]["providerID"].as_str().unwrap_or("");
                                     let model = s["model"]["id"].as_str().unwrap_or("");
                                     if provider.is_empty() || model.is_empty() {
                                         log::error!("summarize: у сессии нет модели: {s}");
                                     } else {
-                                        match client.summarize_session(sid, provider, model).await {
-                                            Ok(()) => log::info!("summarize {sid} ({provider}/{model})"),
+                                        match client.summarize_session(id, provider, model).await {
+                                            Ok(()) => log::info!("summarize {id} ({provider}/{model})"),
                                             Err(e) => log::error!("summarize_session: {e}"),
                                         }
                                     }
@@ -673,66 +703,62 @@ async fn run_stream(
                                 Err(e) => log::error!("get_session: {e}"),
                             }
                         }
-                        Some(Cmd::Abort) => {
-                            if sid.is_empty() {
+                        Cmd::Abort { id } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            match client.abort(sid).await {
+                            match client.abort(id).await {
                                 Ok(_) => {
-                                    log::info!("abort {sid}");
+                                    log::info!("abort {id}");
                                     set_status(&status, "idle");
                                 }
                                 Err(e) => log::error!("abort: {e}"),
                             }
                         }
-                        Some(Cmd::SetModel) => {
-                            if sid.is_empty() {
+                        Cmd::SetModel { id, provider, model } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            let provider = cmd["provider"].as_str().unwrap_or("");
-                            let model = cmd["model"].as_str().unwrap_or("");
-                            match client.set_model(sid, provider, model).await {
+                            match client.set_model(id, provider, model).await {
                                 Ok(()) => {
-                                    log::info!("set_model {sid} -> {provider}/{model}");
+                                    log::info!("set_model {id} -> {provider}/{model}");
                                     refresh_sessions(&client, &sessions).await;
                                 }
                                 Err(e) => log::error!("set_model: {e}"),
                             }
                         }
-                        Some(Cmd::SetMode) => {
-                            if sid.is_empty() {
+                        Cmd::SetMode { id, mode } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            let mode = cmd["mode"].as_str().unwrap_or("");
                             if !mode.is_empty() {
-                                session_agents.insert(sid.to_string(), mode.to_string());
+                                session_agents.insert(id.to_string(), mode.to_string());
                             }
-                            match client.set_session_agent(sid, mode).await {
-                                Ok(()) => log::info!("set_mode {sid} -> {mode}"),
+                            match client.set_session_agent(id, mode).await {
+                                Ok(()) => log::info!("set_mode {id} -> {mode}"),
                                 Err(e) => log::error!("set_mode: {e}"),
                             }
                         }
-                        Some(Cmd::Rename) => {
-                            if sid.is_empty() {
+                        Cmd::Rename { id, title } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            let title = cmd["title"].as_str().unwrap_or("");
-                            match client.rename_session(sid, title).await {
+                            match client.rename_session(id, title).await {
                                 Ok(()) => {
-                                    log::info!("renamed {sid} -> {title:?}");
+                                    log::info!("renamed {id} -> {title:?}");
                                     refresh_sessions(&client, &sessions).await;
                                 }
                                 Err(e) => log::error!("rename_session: {e}"),
                             }
                         }
-                        Some(Cmd::Delete) => {
-                            if sid.is_empty() {
+                        Cmd::Delete { id } => {
+                            if id.is_empty() {
                                 continue;
                             }
-                            match client.delete_session(sid).await {
+                            match client.delete_session(id).await {
                                 Ok(()) => {
-                                    log::info!("deleted {sid}");
-                                    if current_session.as_deref() == Some(sid) {
+                                    log::info!("deleted {id}");
+                                    if current_session.as_deref() == Some(id.as_str()) {
                                         current_session = None;
                                         persist_last_session(None);
                                         set_current_session(&current_session_shared, &current_session);
@@ -745,7 +771,7 @@ async fn run_stream(
                                 Err(e) => log::error!("delete_session: {e}"),
                             }
                         }
-                        Some(Cmd::DeleteAll) => {
+                        Cmd::DeleteAll => {
                             let ids: Vec<String> = match client.list_sessions().await {
                                 Ok(v) => v
                                     .as_array()
@@ -792,6 +818,8 @@ async fn run_stream(
                                         persist_last_session(Some(id));
                                         parts.clear();
                                         assistant_messages.clear();
+                                        reasonings.clear();
+                                        reasoning_order.clear();
                                         clear_tools(&dispatcher, &tools).await;
                                         set_current_session(&current_session_shared, &current_session);
                                         if let Ok(mut g) = todos.lock() {
@@ -806,53 +834,43 @@ async fn run_stream(
                             }
                             request_nav(&nav, 2);
                         }
-                        Some(Cmd::VoiceLang)
-                        | Some(Cmd::VoiceSelectStt)
-                        | Some(Cmd::VoiceSelectTts)
-                        | Some(Cmd::VoiceDownload)
-                        | Some(Cmd::VoiceDownloadCancel)
-                        | Some(Cmd::VoiceDelete)
-                        | Some(Cmd::VoiceRecordStart)
-                        | Some(Cmd::VoiceRecordStop)
-                        | Some(Cmd::VoiceStt)
-                        | Some(Cmd::VoiceTts)
-                        | Some(Cmd::VoiceTtsMode)
-                        | Some(Cmd::VoiceTtsCancel)
-                        | Some(Cmd::VoiceCatalogUpdate) => {
-                            voice::run_command(&voice, &cmd, &worker_pending).await;
+                        Cmd::VoiceLang { .. }
+                        | Cmd::VoiceSelectStt { .. }
+                        | Cmd::VoiceSelectTts { .. }
+                        | Cmd::VoiceDownload { .. }
+                        | Cmd::VoiceDownloadCancel { .. }
+                        | Cmd::VoiceDelete { .. }
+                        | Cmd::VoiceRecordStart
+                        | Cmd::VoiceRecordStop
+                        | Cmd::VoiceStt
+                        | Cmd::VoiceTts { .. }
+                        | Cmd::VoiceTtsMode { .. }
+                        | Cmd::VoiceTtsCancel
+                        | Cmd::VoiceCatalogUpdate => {
+                            voice::run_command(&voice, &command, &worker_pending).await;
                         }
 
-                        Some(Cmd::GetSettings) => {
-                            let mut st = load_settings();
-                            if st.get("workdir").is_none() {
-                                st["workdir"] = serde_json::json!(default_workdir().to_string_lossy());
-                                save_settings_file(&st);
-                            }
+                        Cmd::GetSettings => {
+                            let st = Settings::load();
+                            st.save();
                             if let Ok(mut g) = settings.lock() {
-                                *g = st.to_string();
+                                *g = st.to_json();
                             }
                         }
-                        Some(Cmd::SaveSettings) => {
-                            if let Some(v) = cmd.get("value") {
-                                if let Ok(sv) = serde_json::from_value::<serde_json::Value>(v.clone()) {
-                                    save_settings_file(&sv);
-                                    if let Ok(mut g) = settings.lock() {
-                                        *g = sv.to_string();
-                                    }
-                                }
+                        Cmd::SaveSettings { value } => {
+                            value.save();
+                            if let Ok(mut g) = settings.lock() {
+                                *g = value.to_json();
                             }
                         }
-                        Some(Cmd::SetWorkdir) => {
-                            if let Some(val) = cmd.get("value").and_then(|x| x.as_str()) {
-                                let mut st = load_settings();
-                                st["workdir"] = serde_json::json!(val);
-                                save_settings_file(&st);
-                                if let Ok(mut g) = settings.lock() {
-                                    *g = st.to_string();
-                                }
+                        Cmd::SetWorkdir { workdir } => {
+                            let mut st = Settings::load();
+                            st.workdir = workdir.clone();
+                            st.save();
+                            if let Ok(mut g) = settings.lock() {
+                                *g = st.to_json();
                             }
                         }
-                        None => log::warn!("неизвестная команда: {raw_cmd:?} ({raw})"),
                     }
                 }
 
@@ -922,6 +940,7 @@ async fn run_stream(
                 if ticks % 5 == 0 {
                     refresh_tools_json(&dispatcher, &tools).await;
                     refresh_permissions_json(&dispatcher, &permissions).await;
+                    refresh_questions_json(&dispatcher, &questions).await;
                 }
             }
         }
@@ -1323,6 +1342,14 @@ async fn refresh_permissions_json(
 ) {
     let st = dispatcher.lock().await;
     let pending = &st.permissions.pending;
+    let options: Vec<serde_json::Value> = [
+        ("Разрешить один раз", PermissionReplyKind::Once),
+        ("Всегда разрешать", PermissionReplyKind::Always),
+        ("Запретить", PermissionReplyKind::Reject),
+    ]
+    .iter()
+    .map(|(label, kind)| serde_json::json!({ "label": label, "value": kind }))
+    .collect();
     let arr: Vec<serde_json::Value> = pending
         .iter()
         .map(|p| {
@@ -1332,11 +1359,7 @@ async fn refresh_permissions_json(
                 "action": p.action,
                 "resources": p.resources,
                 "metadata": p.metadata.as_ref().map(|m| m.to_string()).unwrap_or_default(),
-                "options": [
-                    { "label": "Разрешить один раз", "value": "once" },
-                    { "label": "Всегда разрешать", "value": "always" },
-                    { "label": "Запретить", "value": "reject" },
-                ],
+                "options": options,
             })
         })
         .collect();
@@ -1346,28 +1369,43 @@ async fn refresh_permissions_json(
         *g = pj;
     }
 }
-fn settings_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".into());
-    std::path::PathBuf::from(home).join(".config/harbour-opencode").join("settings.json")
-}
 
-fn load_settings() -> serde_json::Value {
-    let p = settings_path();
-    match std::fs::read_to_string(&p) {
-        Ok(txt) => serde_json::from_str(&txt).unwrap_or_default(),
-        Err(_) => serde_json::json!({}),
+/// Snapshot of pending questions from the model for the dialog.
+async fn refresh_questions_json(
+    dispatcher: &event::dispatcher::SharedState,
+    questions: &Arc<std::sync::Mutex<String>>,
+) {
+    let st = dispatcher.lock().await;
+    let pending = &st.questions.pending;
+    let arr: Vec<serde_json::Value> = pending
+        .iter()
+        .map(|q| {
+            serde_json::json!({
+                "id": q.id,
+                "sessionID": q.sessionID,
+                "questions": q
+                    .questions
+                    .iter()
+                    .map(|qi| {
+                        serde_json::json!({
+                            "header": qi.header,
+                            "question": qi.question,
+                            "multiple": qi.multiple.unwrap_or(false),
+                            "custom": qi.custom.unwrap_or(true),
+                            "options": qi.options.iter().map(|o| serde_json::json!({
+                                "label": o.label,
+                                "description": o.description,
+                            })).collect::<Vec<_>>(),
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    drop(st);
+    let qj = serde_json::Value::Array(arr).to_string();
+    if let Ok(mut g) = questions.lock() {
+        *g = qj;
     }
-}
-
-fn save_settings_file(v: &serde_json::Value) {
-    let p = settings_path();
-    if let Some(dir) = p.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let _ = std::fs::write(p, v.to_string());
-}
-
-fn default_workdir() -> std::path::PathBuf {
-    std::path::PathBuf::from("/home/defaultuser/mason")
 }
 

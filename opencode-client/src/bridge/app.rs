@@ -3,6 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::cmd::Cmd;
 use crate::i18n::{err_line, now_ms};
+use crate::settings::Settings;
+use crate::types::event::PermissionReplyKind;
 
 /// Bridge Rust-core ←→ QML.
 ///
@@ -59,6 +61,9 @@ pub struct AppBridge {
     /// Queue of permission requests for the dialog (JSON), written by the worker.
     #[allow(dead_code)]
     permissions_shared: Arc<Mutex<String>>,
+    /// Pending model questions for the dialog (JSON), written by the worker.
+    #[allow(dead_code)]
+    questions_shared: Arc<Mutex<String>>,
     /// JSON settings status (directory handling, etc.), written by the worker/backend.
     #[allow(dead_code)]
     settings_shared: Arc<Mutex<String>>,
@@ -99,14 +104,14 @@ pub struct AppBridge {
     /// QML: create a new session.
     new_session: qt_method!(fn new_session(&self) {
         log::info!("QML new_session");
-        self.push_command(serde_json::json!({ "cmd": Cmd::New }));
+        self.push_command(Cmd::New.to_value());
     }),
     /// QML: open a session by id (loads the history).
     open_session: qt_method!(fn open_session(&self, id: QString) {
         let id = id.to_string();
         log::info!("QML open_session -> {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": Cmd::Open, "id": id }));
+            self.push_command(Cmd::Open { id }.to_value());
         }
     }),
     /// QML: rename a session.
@@ -115,7 +120,7 @@ pub struct AppBridge {
         let title = title.to_string();
         log::info!("QML rename_session {id:?} -> {title:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": Cmd::Rename, "id": id, "title": title }));
+            self.push_command(Cmd::Rename { id, title }.to_value());
         }
     }),
     /// QML: delete a session.
@@ -123,20 +128,20 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML delete_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": Cmd::Delete, "id": id }));
+            self.push_command(Cmd::Delete { id }.to_value());
         }
     }),
     /// QML: delete all sessions.
     delete_all_sessions: qt_method!(fn delete_all_sessions(&self) {
         log::info!("QML delete_all_sessions");
-        self.push_command(serde_json::json!({ "cmd": Cmd::DeleteAll }));
+        self.push_command(Cmd::DeleteAll.to_value());
     }),
     /// QML: fork a session (create a branch).
     fork_session: qt_method!(fn fork_session(&self, id: QString) {
         let id = id.to_string();
         log::info!("QML fork_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": Cmd::Fork, "id": id }));
+            self.push_command(Cmd::Fork { id }.to_value());
         }
     }),
     /// QML: share a session (get a link).
@@ -144,7 +149,7 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML share_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": Cmd::Share, "id": id }));
+            self.push_command(Cmd::Share { id }.to_value());
         }
     }),
     /// QML: revoke link access.
@@ -152,7 +157,7 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML unshare_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": Cmd::Unshare, "id": id }));
+            self.push_command(Cmd::Unshare { id }.to_value());
         }
     }),
     /// QML: summarize (compact) the session history.
@@ -160,7 +165,7 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML summarize_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": Cmd::Summarize, "id": id }));
+            self.push_command(Cmd::Summarize { id }.to_value());
         }
     }),
     /// QML: abort execution in the session.
@@ -168,7 +173,7 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML abort_session {id:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": Cmd::Abort, "id": id }));
+            self.push_command(Cmd::Abort { id }.to_value());
         }
     }),
     /// QML: id of the current session (read-only, updated by the worker).
@@ -203,9 +208,7 @@ pub struct AppBridge {
         let model = model.to_string();
         log::info!("QML set_model {id:?} -> {provider}/{model}");
         if !id.is_empty() && !provider.is_empty() && !model.is_empty() {
-            self.push_command(serde_json::json!({
-                "cmd": Cmd::SetModel, "id": id, "provider": provider, "model": model
-            }));
+            self.push_command(Cmd::SetModel { id, provider, model }.to_value());
         }
     }),
     /// QML: switch the session mode/agent (Build | Plan).
@@ -214,9 +217,7 @@ pub struct AppBridge {
         let mode = mode.to_string();
         log::info!("QML set_mode {id:?} -> {mode:?}");
         if !id.is_empty() {
-            self.push_command(serde_json::json!({
-                "cmd": Cmd::SetMode, "id": id, "mode": mode
-            }));
+            self.push_command(Cmd::SetMode { id, mode }.to_value());
         }
     }),
     /// QML: take the requested carousel page (or -1).
@@ -233,15 +234,15 @@ pub struct AppBridge {
     /// QML: voice command (cmd + payload: model id / lang). Async — worker.
     /// The string from QML is validated via `Cmd` — unknown values are discarded.
     voice_command: qt_method!(fn voice_command(&self, cmd: QString, val: QString) {
+        let name = cmd.to_string();
         let val = val.to_string();
-        let cmd: Option<Cmd> = serde_json::from_value(serde_json::json!(cmd.to_string())).ok();
-        match cmd {
+        match Cmd::from_name_id(&name, &val) {
             Some(action) if action.is_voice() => {
                 log::info!("QML voice {action:?} {val:?}");
-                self.push_command(serde_json::json!({ "cmd": action, "id": val }));
+                self.push_command(action.to_value());
             }
             Some(action) => log::warn!("QML voice: не голосовая команда {action:?}"),
-            None => log::warn!("QML voice: неизвестная команда"),
+            None => log::warn!("QML voice: неизвестная команда {name:?}"),
         }
     }),
     /// QML: active tools of the current turn as JSON `[{id,name,status,text}]`.
@@ -254,6 +255,27 @@ pub struct AppBridge {
         let v = self.permissions_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
+    /// QML: pending questions from the model as JSON (read-only).
+    questions_json: qt_method!(fn questions_json(&self) -> QString {
+        let v = self.questions_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+    /// QML: answer a question (`id` = requestID). `answers` is JSON
+    /// `[[label,…],…]` in question order; empty string means "reject".
+    answer_question: qt_method!(fn answer_question(&self, id: QString, answers: QString) {
+        let id = id.to_string();
+        let answers = answers.to_string();
+        log::info!("QML answer_question {id:?}");
+        if id.is_empty() {
+            return;
+        }
+        if answers.is_empty() {
+            self.push_command(Cmd::Question { id, answers: Vec::new(), reject: true }.to_value());
+        } else {
+            let parsed: Vec<Vec<String>> = serde_json::from_str(&answers).unwrap_or_default();
+            self.push_command(Cmd::Question { id, answers: parsed, reject: false }.to_value());
+        }
+    }),
     /// QML: app settings as JSON `{"workdir":"...","..."}`.
     settings_json: qt_method!(fn settings_json(&self) -> QString {
         let v = self.settings_shared.lock().map(|s| s.clone()).unwrap_or_default();
@@ -262,21 +284,24 @@ pub struct AppBridge {
     /// QML: request current settings.
     get_settings: qt_method!(fn get_settings(&self) {
         log::info!("QML get_settings");
-        self.push_command(serde_json::json!({ "cmd": Cmd::GetSettings }));
+        self.push_command(Cmd::GetSettings.to_value());
     }),
     /// QML: save settings (JSON settings object).
     save_settings: qt_method!(fn save_settings(&self, json: QString) {
         let json = json.to_string();
         log::info!("QML save_settings -> {json:?}");
         if !json.is_empty() {
-            self.push_command(serde_json::json!({ "cmd": Cmd::SaveSettings, "value": json }));
+            match serde_json::from_str::<Settings>(&json) {
+                Ok(value) => self.push_command(Cmd::SaveSettings { value }.to_value()),
+                Err(e) => log::warn!("QML save_settings: неверный JSON: {e}"),
+            }
         }
     }),
     /// QML: set the working directory (path string).
     set_workdir: qt_method!(fn set_workdir(&self, path: QString) {
         let path = path.to_string();
         log::info!("QML set_workdir -> {path:?}");
-        self.push_command(serde_json::json!({ "cmd": Cmd::SetWorkdir, "value": path }));
+        self.push_command(Cmd::SetWorkdir { workdir: path }.to_value());
     }),
     /// QML: answer a permission request (`response`: once | always | reject).
     answer_permission: qt_method!(fn answer_permission(&self, session: QString, id: QString, response: QString) {
@@ -285,9 +310,12 @@ pub struct AppBridge {
         let response = response.to_string();
         log::info!("QML answer_permission {session:?} {id:?} -> {response:?}");
         if !session.is_empty() && !id.is_empty() && !response.is_empty() {
-            self.push_command(serde_json::json!({
-                "cmd": Cmd::Permission, "session": session, "id": id, "response": response
-            }));
+            match PermissionReplyKind::from_name(&response) {
+                Some(response) => {
+                    self.push_command(Cmd::Permission { session, id, response }.to_value());
+                }
+                None => log::warn!("QML answer_permission: неизвестный ответ {response:?}"),
+            }
         }
     }),
     /// QML (dev): generate a mock server error into the feed, as if a
@@ -346,7 +374,7 @@ pub struct AppBridge {
     #[cfg(debug_assertions)]
     mock_permission: qt_method!(fn mock_permission(&self) {
         log::info!("QML mock_permission");
-        self.push_command(serde_json::json!({ "cmd": Cmd::MockPermission }));
+        self.push_command(Cmd::MockPermission.to_value());
     }),
     /// QML (dev): whether this is a debug build (true = mock buttons available).
     // The method always exists so the result can be read in release too
@@ -441,6 +469,11 @@ impl AppBridge {
     /// Permission queue handle for the worker.
     pub fn permissions_handle(&self) -> Arc<Mutex<String>> {
         self.permissions_shared.clone()
+    }
+
+    /// Question queue handle for the worker.
+    pub fn questions_handle(&self) -> Arc<Mutex<String>> {
+        self.questions_shared.clone()
     }
 
     /// Settings handle for the worker.

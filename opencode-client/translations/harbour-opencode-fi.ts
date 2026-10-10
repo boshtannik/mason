@@ -485,6 +485,26 @@ pitkä painallus — poista</translation>
         <translation>Agentti pyytää lupaa</translation>
     </message>
     <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1155"/>
+        <source>Model asks a question</source>
+        <translation>Malli kysyy kysymyksen</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1227"/>
+        <source>Your answer…</source>
+        <translation>Vastauksesi…</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1235"/>
+        <source>Answer</source>
+        <translation>Vastaa</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1240"/>
+        <source>Reject</source>
+        <translation>Hylkää</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/harbour-opencode.qml" line="612"/>
         <source>Allow once</source>
         <translation>Salli kerran</translation>

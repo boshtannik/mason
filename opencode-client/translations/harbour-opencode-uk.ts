@@ -485,6 +485,26 @@ long press — remove</source>
         <translation>Агент запитує дозвіл</translation>
     </message>
     <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1155"/>
+        <source>Model asks a question</source>
+        <translation>Модель ставить запитання</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1227"/>
+        <source>Your answer…</source>
+        <translation>Ваша відповідь…</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1235"/>
+        <source>Answer</source>
+        <translation>Відповісти</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1240"/>
+        <source>Reject</source>
+        <translation>Відхилити</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/harbour-opencode.qml" line="612"/>
         <source>Allow once</source>
         <translation>Дозволити один раз</translation>

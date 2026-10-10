@@ -478,6 +478,26 @@ long press — remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1155"/>
+        <source>Model asks a question</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1227"/>
+        <source>Your answer…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1235"/>
+        <source>Answer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/harbour-opencode.qml" line="1240"/>
+        <source>Reject</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/harbour-opencode.qml" line="612"/>
         <source>Allow once</source>
         <translation type="unfinished"></translation>

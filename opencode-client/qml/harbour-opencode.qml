@@ -112,6 +112,12 @@ ApplicationWindow {
     // Granting "Allow once": true if the request is really new
     // (so the sound fires only for newly appeared ones).
     property var knownPermissionIds: []
+    // Pending questions from the model (`[{id,sessionID,questions:[…]}]`).
+    property var pendingQuestions: []
+    property var knownQuestionIds: []
+    property bool questionOverlayVisible: false
+    // Per-question answer state for the CURRENT request (`[{selected:[…],custom:""}]`).
+    property var qAnswers: []
     property bool sttModelReady: false
     // opencode working directory (setting). Loaded from bridge.settings_json().
     property string workdir: ""
@@ -165,6 +171,12 @@ ApplicationWindow {
     readonly property string engineTts: "tts_piper"
     readonly property string stateDownloading: "downloading"
     readonly property string stateError: "error"
+
+    // Protocol constants of the permission reply — must equal the serde names
+    // of `PermissionReplyKind` in src/types/event.rs (lowercase).
+    readonly property string replyOnce: "once"
+    readonly property string replyAlways: "always"
+    readonly property string replyReject: "reject"
 
     // Request to switch the carousel page (0..3).
     signal requestPage(int index)
@@ -409,8 +421,18 @@ ApplicationWindow {
                         var rText = bodyTmp.substring(app.kThinkLiveTag.length)
                         var rLine = app.kTsOpen + app.msOf(line) + app.kTsClose
                                     + app.kThinkTag + rText
-                        if (acc.length > 0
-                            && app.lineIs(app.stripTs(acc[acc.length - 1]), app.kThinkTag)) {
+                        // Replace the trailing think bubble ONLY when the incoming
+                        // text continues the SAME reasoning block: within a block
+                        // the worker always pushes the full accumulated text, so it
+                        // starts with what is already shown. When a NEW block starts
+                        // (think → tool → think) the text does not continue the
+                        // previous one — a fresh bubble is appended, and the finished
+                        // block stays in the feed. This also protects finalized
+                        // (static) [[think]] bubbles from history.
+                        var prevBody = acc.length > 0 ? app.stripTs(acc[acc.length - 1]) : ""
+                        var prevText = app.lineIs(prevBody, app.kThinkTag)
+                                       ? prevBody.substring(app.kThinkTag.length) : null
+                        if (prevText !== null && rText.indexOf(prevText) === 0) {
                             acc[acc.length - 1] = rLine
                         } else {
                             acc = acc.concat(rLine)
@@ -558,6 +580,28 @@ ApplicationWindow {
                 }
             } catch (e) {
                 console.log("permissions parse error: " + e)
+            }
+        }
+        var qj = bridge.questions_json()
+        if (qj !== "" && qj !== undefined) {
+            try {
+                var qparsed = JSON.parse(qj)
+                app.pendingQuestions = qparsed
+                if (qparsed.length === 0) {
+                    app.questionOverlayVisible = false
+                } else {
+                    // New request (id not seen yet) — signal the user and
+                    // pre-build the answer state for its questions.
+                    var qid = qparsed[0].id
+                    if (app.knownQuestionIds.indexOf(qid) < 0) {
+                        app.knownQuestionIds = app.knownQuestionIds.concat(qid)
+                        app.qAnswers = app.initAnswers(qparsed[0])
+                        app.notifyQuestion()
+                        app.questionOverlayVisible = true
+                    }
+                }
+            } catch (e) {
+                console.log("questions parse error: " + e)
             }
         }
         var sj = bridge.settings_json()
@@ -843,6 +887,16 @@ ApplicationWindow {
             app.publishNotification(qsTr("opencode"), qsTr("Agent requests permission"))
         }
     }
+
+    function notifyQuestion() {
+        if (!app.soundOnFinish)
+            return
+        if (Qt.application.state === Qt.ApplicationActive) {
+            app.playDing()
+        } else {
+            app.publishNotification(qsTr("opencode"), qsTr("Model asks a question"))
+        }
+    }
     function stopAgent() {
         if (app.currentSessionId !== "")
             app.abortSession(app.currentSessionId)
@@ -857,6 +911,67 @@ ApplicationWindow {
     property bool permissionOverlayVisible: false
     function showPermissionOverlay() {
         app.permissionOverlayVisible = app.pendingPermissions.length > 0
+    }
+
+    // ── Model questions ───────────────────────────────────────────────────────
+    // Fresh answer state for a question request: one {selected:[],custom:""} per
+    // question, in order.
+    function initAnswers(req) {
+        var arr = []
+        for (var i = 0; i < req.questions.length; i++)
+            arr.push({ selected: [], custom: "" })
+        return arr
+    }
+    // Toggle an option label for question qi (single choice unless `multiple`).
+    function toggleOption(qi, label) {
+        var a = app.qAnswers
+        if (qi < 0 || qi >= a.length)
+            return
+        var req = app.pendingQuestions[0]
+        var multiple = req && req.questions[qi] && req.questions[qi].multiple === true
+        var sel = a[qi].selected.slice(0)
+        var idx = sel.indexOf(label)
+        if (idx >= 0) {
+            sel.splice(idx, 1)
+        } else if (multiple) {
+            sel.push(label)
+        } else {
+            sel = [label]
+        }
+        a[qi].selected = sel
+        app.qAnswers = a.slice(0)
+    }
+    function isSelected(qi, label) {
+        if (qi < 0 || qi >= app.qAnswers.length)
+            return false
+        return app.qAnswers[qi].selected.indexOf(label) >= 0
+    }
+    function setCustom(qi, text) {
+        var a = app.qAnswers
+        if (qi < 0 || qi >= a.length)
+            return
+        a[qi].custom = text
+        app.qAnswers = a.slice(0)
+    }
+    // Build answers (in question order) and send them.
+    function submitQuestion() {
+        var req = app.pendingQuestions[0]
+        if (!req)
+            return
+        var answers = []
+        for (var i = 0; i < req.questions.length; i++) {
+            var one = (app.qAnswers[i] ? app.qAnswers[i].selected.slice(0) : [])
+            var c = (app.qAnswers[i] ? "" + app.qAnswers[i].custom : "").trim()
+            if (c !== "")
+                one.push(c)
+            answers.push(one)
+        }
+        bridge.answer_question(req.id, JSON.stringify(answers))
+        app.questionOverlayVisible = false
+    }
+    function rejectQuestion(id) {
+        // Empty answers => reject.
+        bridge.answer_question(id, "")
     }
 
     initialPage: Component {
@@ -980,7 +1095,7 @@ ApplicationWindow {
                                 app.answerPermission(
                                     app.pendingPermissions[0].sessionID,
                                     app.pendingPermissions[0].id,
-                                    "once")
+                                    app.replyOnce)
                                 app.permissionOverlayVisible = false
                             }
                         }
@@ -991,7 +1106,7 @@ ApplicationWindow {
                                 app.answerPermission(
                                     app.pendingPermissions[0].sessionID,
                                     app.pendingPermissions[0].id,
-                                    "always")
+                                    app.replyAlways)
                                 app.permissionOverlayVisible = false
                             }
                         }
@@ -1002,8 +1117,132 @@ ApplicationWindow {
                                 app.answerPermission(
                                     app.pendingPermissions[0].sessionID,
                                     app.pendingPermissions[0].id,
-                                    "reject")
+                                    app.replyReject)
                                 app.permissionOverlayVisible = false
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Model question overlay (higher z than the permission card).
+            Rectangle {
+                id: questionOverlay
+                visible: app.questionOverlayVisible && app.pendingQuestions.length > 0
+                anchors.fill: parent
+                color: Qt.rgba(0, 0, 0, 0.7)
+                z: 25
+
+                Rectangle {
+                    id: questionCard
+                    anchors.centerIn: parent
+                    width: parent.width - 2 * Theme.horizontalPageMargin
+                    height: Math.min(questionColumn.height + 2 * Theme.paddingMedium,
+                                     parent.height - 2 * Theme.paddingLarge)
+                    color: Qt.rgba(0.05, 0.05, 0.08, 0.97)
+                    radius: Theme.paddingMedium
+                    border.color: Theme.primaryColor
+                    border.width: 1
+
+                    Flickable {
+                        anchors.fill: parent
+                        anchors.margins: Theme.paddingMedium
+                        contentWidth: width
+                        contentHeight: questionColumn.height
+                        flickableDirection: Flickable.VerticalFlick
+
+                        Column {
+                            id: questionColumn
+                            width: parent.width
+                            spacing: Theme.paddingMedium
+
+                            Label {
+                                width: parent.width
+                                text: qsTr("Model asks a question")
+                                color: Theme.primaryColor
+                                font.pixelSize: Theme.fontSizeLarge
+                                font.bold: true
+                                wrapMode: Text.Wrap
+                            }
+
+                            Repeater {
+                                model: app.pendingQuestions[0].questions
+
+                                Column {
+                                    property int qIndex: index
+                                    width: parent.width
+                                    spacing: Theme.paddingSmall
+
+                                    Label {
+                                        width: parent.width
+                                        visible: text !== ""
+                                        text: modelData.header
+                                        color: Theme.primaryColor
+                                        font.pixelSize: Theme.fontSizeMedium
+                                        font.bold: true
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Label {
+                                        width: parent.width
+                                        text: modelData.question
+                                        color: Theme.highlightColor
+                                        wrapMode: Text.Wrap
+                                    }
+                                    Repeater {
+                                        model: modelData.options
+
+                                        BackgroundItem {
+                                            width: parent.width
+                                            height: optCol.height + Theme.paddingSmall
+                                            onClicked: app.toggleOption(qIndex, modelData.label)
+
+                                            Column {
+                                                id: optCol
+                                                width: parent.width
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                Label {
+                                                    width: parent.width
+                                                    text: (app.isSelected(qIndex, modelData.label)
+                                                           ? "\u2713  " : "") + modelData.label
+                                                    color: app.isSelected(qIndex, modelData.label)
+                                                           ? Theme.primaryColor
+                                                           : Theme.highlightColor
+                                                    font.bold: app.isSelected(qIndex, modelData.label)
+                                                    wrapMode: Text.Wrap
+                                                }
+                                                Label {
+                                                    width: parent.width
+                                                    visible: modelData.description !== ""
+                                                    text: modelData.description
+                                                    font.pixelSize: Theme.fontSizeSmall
+                                                    color: Theme.secondaryColor
+                                                    wrapMode: Text.Wrap
+                                                }
+                                            }
+                                        }
+                                    }
+                                    TextField {
+                                        width: parent.width
+                                        visible: modelData.custom === true
+                                        placeholderText: qsTr("Your answer…")
+                                        onTextChanged: app.setCustom(qIndex, text)
+                                    }
+                                }
+                            }
+
+                            Button {
+                                width: parent.width
+                                text: qsTr("Answer")
+                                onClicked: app.submitQuestion()
+                            }
+                            Button {
+                                width: parent.width
+                                text: qsTr("Reject")
+                                onClicked: {
+                                    if (app.pendingQuestions.length > 0)
+                                        app.rejectQuestion(app.pendingQuestions[0].id)
+                                    app.questionOverlayVisible = false
+                                }
                             }
                         }
                     }

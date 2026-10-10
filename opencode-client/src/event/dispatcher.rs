@@ -3,10 +3,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::state::permission::PermissionQueue;
+use crate::state::question::QuestionQueue;
 use crate::state::session::SessionFsm;
 use crate::state::tool::ToolStore;
 use crate::types::event::Event;
 use crate::types::permission::Permission;
+use crate::types::QuestionRequest;
 
 /// Applies an event to the state. Returns bool — "state changed" (redraw the UI).
 pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
@@ -68,6 +70,40 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
             {
                 state.tools.upsert(callID.clone(), tool.clone(), ts.clone());
             }
+            true
+        }
+        Event::QuestionAsked { properties } => {
+            state.questions.push(QuestionRequest {
+                id: properties.id.clone(),
+                sessionID: properties.sessionID.clone(),
+                questions: properties.questions.clone(),
+                tool: properties.tool.clone(),
+            });
+            true
+        }
+        Event::QuestionV2Asked { properties } => {
+            state.questions.push(QuestionRequest {
+                id: properties.id.clone(),
+                sessionID: properties.sessionID.clone(),
+                questions: properties.questions.clone(),
+                tool: properties.tool.clone(),
+            });
+            true
+        }
+        Event::QuestionReplied { properties: p } => {
+            state.questions.pop(&p.requestID);
+            true
+        }
+        Event::QuestionV2Replied { properties: p } => {
+            state.questions.pop(&p.requestID);
+            true
+        }
+        Event::QuestionRejected { properties: p } => {
+            state.questions.pop(&p.requestID);
+            true
+        }
+        Event::QuestionV2Rejected { properties: p } => {
+            state.questions.pop(&p.requestID);
             true
         }
         Event::SessionCreated { properties } | Event::SessionUpdated { properties } => {
@@ -134,12 +170,6 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
         | Event::PtyUpdated { .. }
         | Event::PtyExited { .. }
         | Event::PtyDeleted { .. }
-        | Event::QuestionV2Asked { .. }
-        | Event::QuestionV2Replied { .. }
-        | Event::QuestionV2Rejected { .. }
-        | Event::QuestionAsked { .. }
-        | Event::QuestionReplied { .. }
-        | Event::QuestionRejected { .. }
         | Event::TodoUpdated { .. }
         | Event::LspUpdated { .. }
         | Event::TuiPromptAppend { .. }
@@ -169,6 +199,7 @@ pub struct DispatcherState {
     pub session_meta: std::collections::HashMap<String, crate::types::session::Session>,
     pub tools: ToolStore,
     pub permissions: PermissionQueue,
+    pub questions: QuestionQueue,
 }
 
 pub type SharedState = Arc<Mutex<DispatcherState>>;

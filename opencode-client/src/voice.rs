@@ -1154,131 +1154,116 @@ pub async fn tts_from_call(voice: &Arc<VoiceState>, text: &str, pending: &Arc<st
 /// Handle voice module commands (from the QML queue).
 pub async fn run_command(
     voice: &Arc<VoiceState>,
-    cmd: &Value,
+    cmd: &Cmd,
     pending: &Arc<std::sync::Mutex<Vec<String>>>,
 ) {
-    let action: Option<Cmd> = cmd
-        .get("cmd")
-        .and_then(|c| serde_json::from_value(c.clone()).ok());
-    match action {
-        Some(Cmd::VoiceLang) => {
-            if let Some(l) = cmd["id"].as_str() {
-                if let Ok(mut g) = voice.lang.lock() {
-                    *g = l.to_string();
+    match cmd {
+        Cmd::VoiceLang { id } => {
+            if let Ok(mut g) = voice.lang.lock() {
+                *g = id.clone();
+            }
+            log::info!("voice lang = {id}");
+            voice.persist();
+            voice.refresh_status();
+        }
+        Cmd::VoiceSelectStt { id } => {
+            if let Ok(mut g) = voice.stt_model.lock() {
+                *g = id.clone();
+            }
+            log::info!("STT-модель = {id}");
+            voice.persist();
+            voice.refresh_status();
+        }
+        Cmd::VoiceSelectTts { id } => {
+            if let Ok(mut g) = voice.tts_model.lock() {
+                *g = id.clone();
+            }
+            log::info!("TTS-модель = {id}");
+            voice.persist();
+            voice.refresh_status();
+        }
+        Cmd::VoiceDownload { id } => {
+            // Parallel downloads are allowed: each model downloads in its own task.
+            if id.is_empty() {
+                return;
+            }
+            let already = voice
+                .dl
+                .lock()
+                .map(|g| {
+                    g.get(id)
+                        .map(|d| d.state == Phase::Downloading)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if already {
+                log::info!("{id}: уже качается");
+                return;
+            }
+            let cat = load_catalog();
+            let voice2 = voice.clone();
+            let pending2 = pending.clone();
+            let id = id.clone();
+            let name = cat["models"]
+                .as_array()
+                .and_then(|a| a.iter().find(|x| x["model_id"].as_str() == Some(id.as_str())))
+                .and_then(|x| x["name"].as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| id.clone());
+            if let Ok(mut q) = pending.lock() {
+                q.push(svc_line(now_ms(), crate::i18n::K_MODEL_DOWNLOADING, &[name]));
+            }
+            tokio::spawn(async move {
+                download_model(&voice2, &id, &cat, &pending2).await;
+            });
+        }
+        Cmd::VoiceDownloadCancel { id } => {
+            // Cancel the specific model (by id), not all at once.
+            if !id.is_empty() {
+                if let Ok(mut c) = voice.cancel_dl.lock() {
+                    c.insert(id.clone());
                 }
-                log::info!("voice lang = {l}");
-                voice.persist();
-                voice.refresh_status();
+                log::info!("отмена скачивания {id} запрошена");
             }
         }
-        Some(Cmd::VoiceSelectStt) => {
-            if let Some(id) = cmd["id"].as_str() {
+        Cmd::VoiceDelete { id } => {
+            let dir = model_dir(id);
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => log::info!("модель {id} удалена ({})", dir.display()),
+                Err(e) => log::warn!("не удалилась {id}: {e}"),
+            }
+            // If the selected model was deleted — clear the selection and pick a replacement
+            // (so the user knows which model now does recognition/synthesis).
+            let cur = voice.stt_model.lock().map(|g| g.clone()).unwrap_or_default();
+            let cur2 = voice.tts_model.lock().map(|g| g.clone()).unwrap_or_default();
+            let mut note: Option<String> = None;
+            if cur == *id {
+                let repl = replacement_model(&cur, "whisper");
                 if let Ok(mut g) = voice.stt_model.lock() {
-                    *g = id.to_string();
+                    *g = repl.clone().unwrap_or_default();
                 }
-                log::info!("STT-модель = {id}");
-                voice.persist();
-                voice.refresh_status();
-            }
-        }
-        Some(Cmd::VoiceSelectTts) => {
-            if let Some(id) = cmd["id"].as_str() {
-                if let Ok(mut g) = voice.tts_model.lock() {
-                    *g = id.to_string();
-                }
-                log::info!("TTS-модель = {id}");
-                voice.persist();
-                voice.refresh_status();
-            }
-        }
-        Some(Cmd::VoiceDownload) => {
-            if let Some(id) = cmd["id"].as_str() {
-                // Parallel downloads are allowed: each model downloads in its own task.
-                if id.is_empty() {
-                    return;
-                }
-                let already = voice
-                    .dl
-                    .lock()
-                    .map(|g| {
-                        g.get(id)
-                            .map(|d| d.state == Phase::Downloading)
-                            .unwrap_or(false)
-                    })
-                    .unwrap_or(false);
-                if already {
-                    log::info!("{id}: уже качается");
-                    return;
-                }
-                let cat = load_catalog();
-                let voice2 = voice.clone();
-                let pending2 = pending.clone();
-                let id = id.to_string();
-                let name = cat["models"]
-                    .as_array()
-                    .and_then(|a| a.iter().find(|x| x["model_id"].as_str() == Some(id.as_str())))
-                    .and_then(|x| x["name"].as_str().map(|s| s.to_string()))
-                    .unwrap_or_else(|| id.clone());
-                if let Ok(mut q) = pending.lock() {
-                    q.push(svc_line(now_ms(), crate::i18n::K_MODEL_DOWNLOADING, &[name]));
-                }
-                tokio::spawn(async move {
-                    download_model(&voice2, &id, &cat, &pending2).await;
+                note = Some(match repl {
+                    Some(r) => svc_line(now_ms(), crate::i18n::K_STT_MODEL_SELECTED, &[r]),
+                    None => svc_line(now_ms(), crate::i18n::K_STT_MODELS_NONE, &[]),
                 });
             }
-        }
-        Some(Cmd::VoiceDownloadCancel) => {
-            // Cancel the specific model (by id), not all at once.
-            if let Some(id) = cmd["id"].as_str() {
-                if !id.is_empty() {
-                    if let Ok(mut c) = voice.cancel_dl.lock() {
-                        c.insert(id.to_string());
-                    }
-                    log::info!("отмена скачивания {id} запрошена");
+            if cur2 == *id {
+                let repl = replacement_model(&cur2, "piper");
+                if let Ok(mut g) = voice.tts_model.lock() {
+                    *g = repl.clone().unwrap_or_default();
                 }
+                note = match repl {
+                    Some(r) => Some(svc_line(now_ms(), crate::i18n::K_TTS_MODEL_SELECTED, &[r])),
+                    None => Some(svc_line(now_ms(), crate::i18n::K_TTS_MODELS_NONE, &[])),
+                };
             }
-        }
-        Some(Cmd::VoiceDelete) => {
-            if let Some(id) = cmd["id"].as_str() {
-                let dir = model_dir(id);
-                match std::fs::remove_dir_all(&dir) {
-                    Ok(()) => log::info!("модель {id} удалена ({})", dir.display()),
-                    Err(e) => log::warn!("не удалилась {id}: {e}"),
-                }
-                // If the selected model was deleted — clear the selection and pick a replacement
-                // (so the user knows which model now does recognition/synthesis).
-                let cur = voice.stt_model.lock().map(|g| g.clone()).unwrap_or_default();
-                let cur2 = voice.tts_model.lock().map(|g| g.clone()).unwrap_or_default();
-                let mut note: Option<String> = None;
-                if cur == id {
-                    let repl = replacement_model(&cur, "whisper");
-                    if let Ok(mut g) = voice.stt_model.lock() {
-                        *g = repl.clone().unwrap_or_default();
-                    }
-                    note = Some(match repl {
-                        Some(r) => svc_line(now_ms(), crate::i18n::K_STT_MODEL_SELECTED, &[r]),
-                        None => svc_line(now_ms(), crate::i18n::K_STT_MODELS_NONE, &[]),
-                    });
-                }
-                if cur2 == id {
-                    let repl = replacement_model(&cur2, "piper");
-                    if let Ok(mut g) = voice.tts_model.lock() {
-                        *g = repl.clone().unwrap_or_default();
-                    }
-                    note = match repl {
-                        Some(r) => Some(svc_line(now_ms(), crate::i18n::K_TTS_MODEL_SELECTED, &[r])),
-                        None => Some(svc_line(now_ms(), crate::i18n::K_TTS_MODELS_NONE, &[])),
-                    };
-                }
-                if let (Some(n), Ok(mut q)) = (note, pending.lock()) {
-                    q.push(n);
-                }
-                voice.persist();
-                voice.refresh_status();
+            if let (Some(n), Ok(mut q)) = (note, pending.lock()) {
+                q.push(n);
             }
+            voice.persist();
+            voice.refresh_status();
         }
-        Some(Cmd::VoiceRecordStart) => start_recording(voice).await,
-        Some(Cmd::VoiceRecordStop) => {
+        Cmd::VoiceRecordStart => start_recording(voice).await,
+        Cmd::VoiceRecordStop => {
             stop_recording(voice).await;
             // Confirm the end of listening with a short status message.
             if let Ok(mut q) = pending.lock() {
@@ -1286,28 +1271,24 @@ pub async fn run_command(
             }
             stt_from_call(voice, pending).await;
         }
-        Some(Cmd::VoiceStt) => stt_from_call(voice, pending).await,
-        Some(Cmd::VoiceTts) => {
-            if let Some(text) = cmd["id"].as_str() {
-                if !text.trim().is_empty() {
-                    tts_from_call(voice, text, pending).await;
-                }
+        Cmd::VoiceStt => stt_from_call(voice, pending).await,
+        Cmd::VoiceTts { id } => {
+            if !id.trim().is_empty() {
+                tts_from_call(voice, id, pending).await;
             }
         }
-        Some(Cmd::VoiceTtsMode) => {
-            if let Some(mode) = cmd["id"].as_str() {
-                if let Some(m) = TtsMode::parse(mode) {
-                    if let Ok(mut g) = voice.tts_mode.lock() {
-                        *g = m;
-                    }
-                    log::info!("режим озвучки = {}", m.as_str());
-                    voice.persist();
-                } else {
-                    log::warn!("неизвестный режим озвучки: {mode:?}");
+        Cmd::VoiceTtsMode { id } => {
+            if let Some(m) = TtsMode::parse(id) {
+                if let Ok(mut g) = voice.tts_mode.lock() {
+                    *g = m;
                 }
+                log::info!("режим озвучки = {}", m.as_str());
+                voice.persist();
+            } else {
+                log::warn!("неизвестный режим озвучки: {id:?}");
             }
         }
-        Some(Cmd::VoiceTtsCancel) => {
+        Cmd::VoiceTtsCancel => {
             // Cancel the current synthesis/playback queue: run_tts checks the flag
             // after piper finishes and won't enqueue the WAV.
             if let Ok(mut c) = voice.cancel_tts.lock() {
@@ -1315,7 +1296,7 @@ pub async fn run_command(
             }
             log::info!("TTS: отмена озвучки запрошена");
         }
-        Some(Cmd::VoiceCatalogUpdate) => {
+        Cmd::VoiceCatalogUpdate => {
             // Refresh the model catalog from GitHub; report the result as a
             // chat line (like the other worker notifications).
             let pendant = pending.clone();
@@ -1349,11 +1330,8 @@ pub async fn run_command(
         // the dispatcher in main.rs (its match over Cmd is exhaustive — forgetting
         // a variant when extending is impossible). A catch-all with a log
         // is enough here to notice a stray entry.
-        Some(action) => {
-            log::warn!("voice::run_command: не-голосовая команда {action:?}");
-        }
-        None => {
-            log::warn!("voice::run_command: отсутствует действие команды");
+        other => {
+            log::warn!("voice::run_command: не-голосовая команда {other:?}");
         }
     }
 }

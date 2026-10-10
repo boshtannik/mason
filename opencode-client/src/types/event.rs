@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::message::{Message, Part};
 use super::session::{Session, SessionStatus, Todo};
@@ -919,12 +919,20 @@ pub struct PermissionV2AskedProperties {
     pub source: Option<PermissionV2Source>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PermissionReplyKind {
     Once,
     Always,
     Reject,
+}
+
+impl PermissionReplyKind {
+    /// Parse the QML-supplied reply name (`once` | `always` | `reject`).
+    /// Serde is the single source of the names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        serde_json::from_value(serde_json::Value::String(name.to_string())).ok()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -999,14 +1007,8 @@ pub struct QuestionOption {
     pub description: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct QuestionV2Info {
-    pub question: String,
-    pub header: String,
-    pub options: Vec<QuestionOption>,
-    pub multiple: Option<bool>,
-    pub custom: Option<bool>,
-}
+/// Same shape as `QuestionInfo` (the v2 channel adds no fields), so alias it.
+pub type QuestionV2Info = QuestionInfo;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct QuestionTool {
@@ -1351,7 +1353,6 @@ impl Event {
                     Some((messageID.as_str(), id.as_str(), text.clone()))
                 }
                 Part::Text { .. }
-                | Part::Reasoning { .. }
                 | Part::File { .. }
                 | Part::Tool { .. }
                 | Part::StepStart { .. }
