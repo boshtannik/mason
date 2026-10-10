@@ -87,6 +87,71 @@ Item {
         return out.join("<br/>")
     }
 
+    // Dedicated HTML for a code block: monospace, verbatim whitespace/newlines.
+    function mdCode(s) {
+        return "<pre>" + chatPage.mdEscape(s) + "</pre>"
+    }
+
+    // Split a bubble body into display segments so that fenced code blocks and
+    // whole-line links become their own blocks (each with a copy button):
+    //   {code:false, link:false, text:<prose>, url:"", lang:""}
+    //   {code:true,  link:false, text:<code>, url:"", lang:"<fence-lang>"}
+    //   {code:false, link:true,  text:<title>, url:<url>, lang:""}
+    function splitBody(body) {
+        var segs = []
+        var prose = []
+        function flush() {
+            if (prose.length > 0) {
+                segs.push({ code: false, link: false, text: prose.join("\n"),
+                            url: "", lang: "" })
+                prose = []
+            }
+        }
+        // A whole line that is exactly one link: `- [title](url)` / `[title](url)`
+        // / `- url` / `url`.
+        var linkRe = /^\s*(?:[-*]\s+)?(?:\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)|(https?:\/\/\S+))\s*$/
+        var fenceRe = /^```([\w+-]*)\s*$/
+        var inPre = false
+        var preBuf = []
+        var lines = String(body).split("\n")
+        for (var i = 0; i < lines.length; i++) {
+            var l = lines[i]
+            var fence = fenceRe.exec(l)
+            if (fence) {
+                if (inPre) {
+                    flush()
+                    segs.push({ code: true, link: false,
+                                text: preBuf.join("\n").replace(/\s+$/, ""),
+                                url: "", lang: fence[1] })
+                    preBuf = []
+                    inPre = false
+                } else {
+                    flush()
+                    inPre = true
+                }
+                continue
+            }
+            if (inPre) { preBuf.push(l); continue }
+            var lm = linkRe.exec(l)
+            if (lm) {
+                flush()
+                var url = lm[2] !== undefined ? lm[2] : lm[3]
+                var title = lm[1] !== undefined ? lm[1] : url
+                segs.push({ code: false, link: true, text: title, url: url, lang: "" })
+                continue
+            }
+            prose.push(l)
+        }
+        if (inPre) {
+            flush()
+            segs.push({ code: true, link: false,
+                        text: preBuf.join("\n").replace(/\s+$/, ""),
+                        url: "", lang: "" })
+        }
+        flush()
+        return segs
+    }
+
     Connections {
         target: chatPage.appWindow
         onDictated: {
@@ -282,14 +347,32 @@ Item {
                     b = b.substring(appWindow.kSvcTag.length)
                 return b.replace(/^\n+/, "")
             }
+            // The body split into display segments: prose, fenced-code blocks
+            // and whole-line links — so copy buttons can sit next to each block.
+            // `{code, link, text, url, lang}` (see chatPage.splitBody).
+            property var segments: chatPage.splitBody(line.body)
             readonly property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
-            // Width of the bottom line: time + (for the agent) the TTS button + padding.
+            // Width of the bottom line: time + (copy and, for the agent, TTS) buttons + padding.
             readonly property real footW: {
                 var w = tsLabel.implicitWidth
-                if (!line.isUser && !line.isSystem && line.tsMs !== ""
-                        && appWindow.ttsModelReady && appWindow.ttsMode !== "off")
+                if (!line.isUser && !line.isSystem && line.tsMs !== "") {
+                    // copy (always on agent/thinking lines)
                     w += Theme.itemSizeMedium + Theme.paddingSmall
+                    // speak (only when TTS is available)
+                    if (appWindow.ttsModelReady && appWindow.ttsMode !== "off")
+                        w += Theme.itemSizeMedium + Theme.paddingSmall
+                }
                 return w
+            }
+
+            // Hidden measuring label: keeps the bubble width in line with the
+            // old single-label layout (natural width of the whole body).
+            Label {
+                id: measLabel
+                visible: false
+                width: line.maxW - 2 * Theme.paddingSmall
+                text: line.body
+                font.pixelSize: Theme.fontSizeSmall
             }
 
             Rectangle {
@@ -305,10 +388,10 @@ Item {
                                 ? Theme.rgba(Theme.secondaryColor, 0.10)
                                 : Theme.rgba(Theme.primaryColor, 0.12))))
                 width: Math.min(line.maxW,
-                                Math.max(textLabel.implicitWidth,
+                                Math.max(measLabel.implicitWidth,
                                          line.footW + 2 * Theme.paddingSmall)
                                 + 2 * Theme.paddingSmall)
-                height: textLabel.height
+                height: bodyCol.height
                         + (footRow.height > 0 ? footRow.height + Theme.paddingSmall : 0)
                         + 2 * Theme.paddingSmall
                 anchors.right: line.isUser ? parent.right : undefined
@@ -316,21 +399,127 @@ Item {
                 anchors.rightMargin: line.isUser ? Theme.horizontalPageMargin : 0
                 anchors.leftMargin: line.isUser ? 0 : Theme.horizontalPageMargin
 
-                Label {
-                    id: textLabel
+                Column {
+                    id: bodyCol
                     x: Theme.paddingSmall
                     y: Theme.paddingSmall
-                    width: Math.min(line.maxW - 2 * Theme.paddingSmall, implicitWidth)
-                    text: chatPage.mdBlock(chatPage.mdEscape(line.body))
-                    textFormat: Text.RichText
-                    wrapMode: Text.Wrap
-                    onLinkActivated: Qt.openUrlExternally(link)
-                    font.pixelSize: Theme.fontSizeSmall
-                    font.italic: line.isThink
-                    color: (line.isThink || line.isSvc)
-                           ? Theme.secondaryColor : Theme.primaryColor
+                    width: bubble.width - 2 * Theme.paddingSmall
+                    spacing: Theme.paddingSmall
+
+                    Repeater {
+                        model: line.segments
+                        delegate: Item {
+                            id: segItem
+                            width: bodyCol.width
+                            property var seg: modelData
+                            height: segItem.seg.code ? segBox.height
+                                    : segItem.seg.link ? linkRow.height
+                                                       : proseLbl.height
+
+                            // Free-form prose (markdown → rich text).
+                            Label {
+                                id: proseLbl
+                                visible: !segItem.seg.code && !segItem.seg.link
+                                width: parent.width
+                                text: chatPage.mdBlock(chatPage.mdEscape(segItem.seg.text))
+                                textFormat: Text.RichText
+                                wrapMode: Text.Wrap
+                                onLinkActivated: Qt.openUrlExternally(link)
+                                font.pixelSize: Theme.fontSizeSmall
+                                font.italic: line.isThink
+                                color: (line.isThink || line.isSvc)
+                                       ? Theme.secondaryColor : Theme.primaryColor
+                            }
+
+                            // A whole-line link: the URL itself + a copy button
+                            // right beside it.
+                            Row {
+                                id: linkRow
+                                visible: segItem.seg.link
+                                width: parent.width
+                                height: Math.max(urlLbl.height, copyLinkBtn.height)
+                                spacing: Theme.paddingSmall
+                                Label {
+                                    id: urlLbl
+                                    width: parent.width - copyLinkBtn.width - parent.spacing
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: segItem.seg.url
+                                    wrapMode: Text.Wrap
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    font.family: "monospace"
+                                    color: Theme.highlightColor
+                                }
+                                // Tap the URL itself to open it (the copy button
+                                // sits to the right).
+                                MouseArea {
+                                    anchors.fill: urlLbl
+                                    onClicked: Qt.openUrlExternally(segItem.seg.url)
+                                }
+                                IconButton {
+                                    id: copyLinkBtn
+                                    width: Theme.itemSizeSmall
+                                    height: Theme.itemSizeSmall
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    icon.source: "image://theme/icon-m-clipboard"
+                                    onClicked: appWindow.copyText(segItem.seg.url)
+                                }
+                            }
+
+                            // Fenced code block: own card with a light header bar
+                            // and a copy button in its top-right corner.
+                            Rectangle {
+                                id: segBox
+                                visible: segItem.seg.code
+                                width: parent.width
+                                radius: Theme.paddingSmall
+                                color: Theme.rgba(Theme.highlightColor, 0.08)
+                                height: codeHeader.height
+                                        + codeLbl.height + 2 * Theme.paddingSmall
+                                Rectangle {
+                                    id: codeHeader
+                                    width: parent.width
+                                    height: Theme.itemSizeSmall
+                                    radius: Theme.paddingSmall
+                                    color: Theme.rgba(Theme.highlightColor, 0.15)
+                                    Label {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: Theme.paddingSmall
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: segItem.seg.lang
+                                        visible: segItem.seg.lang.length > 0
+                                        color: Theme.secondaryColor
+                                        font.pixelSize: Theme.fontSizeExtraSmall
+                                    }
+                                    IconButton {
+                                        id: copyCodeBtn
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: Theme.paddingSmall
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: Theme.itemSizeSmall
+                                        height: Theme.itemSizeSmall
+                                        icon.source: "image://theme/icon-m-clipboard"
+                                        onClicked: appWindow.copyText(segItem.seg.text)
+                                    }
+                                }
+                                Label {
+                                    id: codeLbl
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.leftMargin: Theme.paddingSmall
+                                    anchors.rightMargin: Theme.paddingSmall
+                                    anchors.top: codeHeader.bottom
+                                    text: chatPage.mdCode(segItem.seg.text)
+                                    textFormat: Text.RichText
+                                    wrapMode: Text.Wrap
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.primaryColor
+                                }
+                            }
+                        }
+                    }
                 }
-                // Bottom line: time (+ the TTS button for the agent).
+
+                // Bottom line: time (+ copy and, for the agent, the TTS button).
                 // Pinned to its own bubble edge, with padding from the edges.
                 Row {
                     id: footRow
@@ -339,8 +528,18 @@ Item {
                     anchors.left: line.isUser ? bubble.left : undefined
                     anchors.rightMargin: Theme.paddingSmall + 1
                     anchors.leftMargin: Theme.paddingSmall
-                    y: textLabel.y + textLabel.height + Theme.paddingSmall
+                    y: bodyCol.y + bodyCol.height + Theme.paddingSmall
                     spacing: Theme.paddingMedium
+
+                    // 📋 copy the whole answer (or thinking) to the clipboard.
+                    IconButton {
+                        id: copyBtn
+                        visible: !line.isUser && !line.isSystem
+                        width: visible ? Theme.itemSizeMedium : 0
+                        height: visible ? Theme.itemSizeMedium : 0
+                        icon.source: "image://theme/icon-m-clipboard"
+                        onClicked: appWindow.copyText(line.body)
+                    }
 
                     // 🔊 speak this bubble: agent answers only (not user).
                     // Hit area — the full `iconSizeMedium` icon size, so

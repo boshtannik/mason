@@ -591,5 +591,9 @@ long press — remove</source>
         <source>Failed to update the model catalog: %1</source>
         <translation>Не вдалося оновити каталог: %1</translation>
     </message>
+    <message>
+        <source>Copied</source>
+        <translation>Скопійовано</translation>
+    </message>
 </context>
 </TS>

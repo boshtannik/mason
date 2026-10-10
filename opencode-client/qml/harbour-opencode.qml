@@ -236,6 +236,46 @@ ApplicationWindow {
         expireTimeout: 6000
     }
 
+    // Transient "copied to clipboard" feedback. IMPORTANT: this Silica module
+    // has NO `Toast`/`InfoBanner` types (both fail with "is not a type" and
+    // cause a white screen) — so the banner is a plain Rectangle+Label built
+    // from guaranteed-available primitives only.
+    Rectangle {
+        id: copyToast
+        visible: false
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Theme.paddingLarge
+        radius: Theme.paddingMedium
+        color: Qt.rgba(0.05, 0.05, 0.10, 0.92)
+        width: copyToastTxt.implicitWidth + 2 * Theme.paddingMedium
+        height: copyToastTxt.implicitHeight + Theme.paddingSmall
+        Label {
+            id: copyToastTxt
+            anchors.centerIn: parent
+            text: copyToast.bannerText
+            color: Theme.highlightColor
+            font.pixelSize: Theme.fontSizeSmall
+        }
+        property string bannerText: ""
+        Timer {
+            id: copyToastTimer
+            interval: 1300
+            repeat: false
+            onTriggered: copyToast.visible = false
+        }
+    }
+
+    // Copy `text` to the system clipboard and flash a confirmation banner.
+    function copyText(text) {
+        if (text === undefined || text === "")
+            return
+        Clipboard.text = text
+        copyToast.bannerText = qsTr("Copied")
+        copyToast.visible = true
+        copyToastTimer.restart()
+    }
+
     Timer {
         id: pollTimer
         interval: 300

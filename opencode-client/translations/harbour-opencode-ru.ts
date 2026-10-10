@@ -629,5 +629,9 @@ long press — remove</source>
         <source>Failed to update the model catalog: %1</source>
         <translation>Каталог не обновился: %1</translation>
     </message>
+    <message>
+        <source>Copied</source>
+        <translation>Скопировано</translation>
+    </message>
 </context>
 </TS>

@@ -46,9 +46,10 @@ Item {
                     text: qsTr("Delete")
                     onClicked: {
                         var sid = modelData.id
-                        // The countdown bar is on the row itself, so several sessions
-                        // can be deleted in a row (RemorsePopup blocked the screen).
-                        item.showRemorse(qsTr("Delete session"), function() {
+                        // Row-level remorse via `RemorseItem` (this Silica has no
+                        // ListItem.showRemorse), so several sessions can be deleted
+                        // in a row (a RemorsePopup would block the screen).
+                        remorseItem.execute(item, qsTr("Delete session"), function() {
                             appWindow.deleteSession(sid)
                         })
                     }
@@ -56,6 +57,8 @@ Item {
             }
 
             onClicked: appWindow.openSession(modelData.id)
+
+            RemorseItem { id: remorseItem }
         }
 
         PullDownMenu {

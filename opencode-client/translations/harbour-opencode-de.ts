@@ -591,5 +591,9 @@ lang drücken — entfernen</translation>
         <source>Failed to update the model catalog: %1</source>
         <translation>Fehler beim Aktualisieren des Katalogs: %1</translation>
     </message>
+    <message>
+        <source>Copied</source>
+        <translation>Kopiert</translation>
+    </message>
 </context>
 </TS>

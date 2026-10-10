@@ -596,5 +596,9 @@ long press — remove</source>
         <source>Failed to update the model catalog: %1</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Copied</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 </TS>

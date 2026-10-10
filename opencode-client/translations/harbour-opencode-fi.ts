@@ -591,5 +591,9 @@ pitkä painallus — poista</translation>
         <source>Failed to update the model catalog: %1</source>
         <translation>Luettelon päivitys epäonnistui: %1</translation>
     </message>
+    <message>
+        <source>Copied</source>
+        <translation>Kopioitu</translation>
+    </message>
 </context>
 </TS>
