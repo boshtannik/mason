@@ -53,6 +53,11 @@ Item {
                         if (v[currentIndex] === "text_ptt"
                             && appWindow.pttPosition === "center")
                             appWindow.pttPosition = "left"
+                        // Voice-only: the dictation button defaults to the center
+                        // (unless the user has already placed it elsewhere).
+                        if (v[currentIndex] === "voice"
+                            && appWindow.pttPosition === "left")
+                            appWindow.pttPosition = "center"
                         // The PTT position dropdown recomputes the available items.
                         globalSettingsPage.syncPttCombo()
                     }

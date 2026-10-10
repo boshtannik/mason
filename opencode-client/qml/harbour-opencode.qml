@@ -9,6 +9,10 @@ import "pages"
 ApplicationWindow {
     id: app
 
+    // Custom cover (обложка): the last agent answer + two quick actions
+    // (CoverPage.qml). Defined inline below so it closes over `app`.
+    cover: coverComponent
+
     property var messages: []
     property string statusText: "connecting"
     property string inputMode: inputModeSetting.value !== undefined
@@ -22,8 +26,11 @@ ApplicationWindow {
     // True only in a debug build: enables the mock buttons (errors/permissions).
     readonly property bool devTools: bridge !== undefined
                                      && bridge.dev_tools()
+    // Position of the dictation (PTT) button. The default depends on the mode:
+    // in voice-only it is the center (most natural), in text+PTT — left.
     property string pttPosition: pttPositionSetting.value !== undefined
-                                 ? pttPositionSetting.value : "left"
+                                 ? pttPositionSetting.value
+                                 : (app.inputMode === "voice" ? "center" : "left")
     property string ttsMode: ttsModeSetting.value !== undefined
                              ? ttsModeSetting.value : "button"
     property bool soundOnFinish: soundOnFinishSetting.value !== undefined
@@ -679,11 +686,32 @@ ApplicationWindow {
         }
     }
     function stopPttHold() {
+        dictationTimer.stop()
         if (app.recording) {
             app.recording = false
             app.recognizing = true
             app.voiceCmd(app.cmdRecordStop, "")
         }
+    }
+
+    // ── Cover quick actions (обложка) ──────────────────────────────────
+    // Ask the chat page to focus the prompt input (the keyboard opens on focus).
+    signal quickComposeRequested()
+    // Mic dictation from the cover: open the chat page, start recording and
+    // let the user speak; after the timeout the dictation stops by itself
+    // (then, in voice/PTT modes, the prompt goes out / into the input).
+    function startQuickDictation() {
+        if (app.recording)
+            return
+        app.requestPage(2)
+        app.startPttHold()
+        dictationTimer.restart()
+    }
+    Timer {
+        id: dictationTimer
+        interval: 12000
+        repeat: false
+        onTriggered: app.stopPttHold()
     }
     function voiceModelsFor(engine) {
         var out = []
@@ -1245,6 +1273,108 @@ ApplicationWindow {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Cover (обложка свернутого приложения) ──────────────────────────
+    // Shown on the home screen while the app is backgrounded: the text of the
+    // last agent answer plus two quick actions. "＋" — new session; the second
+    // action composes a new prompt — its icon follows the input mode:
+    //  mic (voice/text+PTT) — start dictation,  pen/text-only — focus the input.
+    // Inline component (not a separate file) so the closure over `app`, the
+    // theme and `qsTr` all work in the cover context.
+    Component {
+        id: coverComponent
+        CoverBackground {
+            id: coverRoot
+
+            // The most recent *agent* answer from the feed as plain text:
+            // skips user lines, thinking, errors and service notices; strips
+            // light markdown. "" when there is none yet.
+            function lastAnswer() {
+                var arr = app.messages
+                for (var i = arr.length - 1; i >= 0; i--) {
+                    var raw = "" + arr[i]
+                    var body = app.stripTs(raw)
+                    if (raw === "" || body === "")
+                        continue
+                    if (app.lineIs(body, app.kUserPrefix)) continue
+                    if (app.lineIs(body, app.kThinkTag)) continue
+                    if (app.lineIs(body, app.kErrTag)) continue
+                    if (app.lineIs(body, app.kSvcTag)) continue
+                    var t = body.replace(/```[\w+-]*\n?/g, "")
+                                .replace(/\n```/g, "")
+                                .replace(/[`#*_>]/g, "")
+                    t = t.replace(/\s+/g, " ").trim()
+                    if (t === "")
+                        continue
+                    return t.length > 180 ? t.substring(0, 180) + "…" : t
+                }
+                return ""
+            }
+            // Keep the answer text current while the chat streams.
+            Connections {
+                target: app
+                onMessagesChanged: answerLbl.text = coverRoot.lastAnswer()
+            }
+
+            Column {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    top: parent.top
+                    topMargin: Theme.paddingMedium
+                }
+                spacing: Theme.paddingSmall
+
+                Label {
+                    text: "opencode"
+                    font.pixelSize: Theme.fontSizeMedium
+                    color: Theme.highlightColor
+                }
+                Label {
+                    text: app.statusBase(app.statusText) === "busy"
+                          ? qsTr("Working…") : qsTr("Ready")
+                    font.pixelSize: Theme.fontSizeSmall
+                    color: app.statusBase(app.statusText) === "busy"
+                           ? Theme.highlightColor : Theme.secondaryColor
+                }
+                Label {
+                    id: answerLbl
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Theme.fontSizeExtraSmall
+                    color: Theme.secondaryColor
+                    text: coverRoot.lastAnswer()
+                    horizontalAlignment: Text.AlignLeft
+                }
+            }
+
+            CoverActionList {
+                // "＋": create a new session and open it.
+                CoverAction {
+                    iconSource: "image://theme/icon-m-add"
+                    onTriggered: {
+                        app.activate()
+                        app.newSession()
+                    }
+                }
+                // Second action — the icon follows the input mode:
+                // text-only → pen (opens the app, focuses the prompt input);
+                // voice/text+PTT → mic (starts a dictation).
+                CoverAction {
+                    iconSource: app.inputMode === "text"
+                                ? "image://theme/icon-m-edit"
+                                : "image://theme/icon-m-mic"
+                    onTriggered: {
+                        app.activate()
+                        if (app.inputMode === "text")
+                            app.quickComposeRequested()
+                        else
+                            app.startQuickDictation()
                     }
                 }
             }

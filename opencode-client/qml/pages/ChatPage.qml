@@ -161,6 +161,12 @@ Item {
             input.text = (cur.length > 0 ? cur + " " : "") + text
             input.focus = true
         }
+        // Cover action "pen" (text-only mode): focus the prompt input and
+        // open the keyboard right away.
+        onQuickComposeRequested: {
+            input.forceActiveFocus()
+            Qt.inputMethod.show()
+        }
     }
 
     StatusHeader {
