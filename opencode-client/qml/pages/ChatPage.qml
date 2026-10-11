@@ -214,7 +214,7 @@ Item {
             right: parent.right
             bottom: inputPanel.top
         }
-        model: appWindow.messages
+        model: appWindow.chatModel
         clip: true
         spacing: Theme.paddingSmall
         delegate: messageDelegate
@@ -364,7 +364,7 @@ Item {
 
             // Raw line from the worker: `[[t:<ms>]]>>> text` (user) or
             // `[[t:<ms>]]text` (agent); a live user line from `send()` — `[[t:<ms>]]>>> text`.
-            property string raw: "" + modelData
+            property string raw: "" + model.text
             property string tsMs: {
                 var m = appWindow.tsRe.exec(line.raw)
                 return m ? m[1] : ""

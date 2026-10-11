@@ -20,7 +20,33 @@ ApplicationWindow {
     // Window) — assigning it yields a blank window. Use applicationActive.
     onApplicationActiveChanged: if (!applicationActive) app.stopTts()
 
+    // Source of truth for the feed (plain JS array; poll() builds it with
+    // concat/slice). The ListView does NOT use it directly — it is mirrored
+    // into `chatModel` incrementally (see syncModel) so the view never resets
+    // its scroll position. Replacing the whole array as the ListView model
+    // (e.g. on every streamed delta) destroyed all delegates and jumped to top.
     property var messages: []
+    ListModel { id: chatModel }
+    property alias chatModel: chatModel
+    onMessagesChanged: app.syncModel(app.messages)
+
+    // Mirror the plain `messages` array into the ListModel incrementally:
+    // update changed items in place (setProperty), append the tail, drop the
+    // excess. The ListView then keeps its scroll position — unlike swapping the
+    // whole array model, which resets to the top on every update.
+    function syncModel(next) {
+        var n = next.length
+        while (chatModel.count > n)
+            chatModel.remove(chatModel.count - 1)
+        for (var i = 0; i < n; i++) {
+            if (i < chatModel.count) {
+                if (chatModel.get(i).text !== next[i])
+                    chatModel.setProperty(i, "text", next[i])
+            } else {
+                chatModel.append({ "text": next[i] })
+            }
+        }
+    }
     property string statusText: "connecting"
     property string inputMode: inputModeSetting.value !== undefined
                                ? inputModeSetting.value : "text_ptt"
