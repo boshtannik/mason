@@ -13,6 +13,13 @@ ApplicationWindow {
     // (CoverPage.qml). Defined inline below so it closes over `app`.
     cover: coverComponent
 
+    // RAII-ish: leaving the app must silence everything. This stops any
+    // playback and asks the worker to cancel a synthesis still in flight; on
+    // exit the worker also kills the piper/whisper children (kill_on_drop).
+    // NOTE: `onClosing` is NOT usable on Silica's ApplicationWindow (private
+    // Window) — assigning it yields a blank window. Use applicationActive.
+    onApplicationActiveChanged: if (!applicationActive) app.stopTts()
+
     property var messages: []
     property string statusText: "connecting"
     property string inputMode: inputModeSetting.value !== undefined
@@ -50,6 +57,10 @@ ApplicationWindow {
     // Live reasoning chunk (`[[thinklive]]<text>`): the worker streams model
     // reasoning deltas; QML replaces the trailing [[think]] bubble in place.
     readonly property string kThinkLiveTag: "[[thinklive]]"
+    // Live answer chunk (`[[answerlive]]<text>`): the worker streams deltas of
+    // every answer text part; QML grows/replaces the trailing answer bubble in
+    // place so the answer is visible while the model types.
+    readonly property string kAnswerLiveTag: "[[answerlive]]";
     readonly property string kUserPrefix: ">>> "
     readonly property string kSttTag: "[[stt]]"
     readonly property string kTtsTag: "[[tts]]"
@@ -309,15 +320,10 @@ ApplicationWindow {
     // TTS queue: WAV files are synthesised by the worker asynchronously
     // (several messages in a row = several files). We play strictly in
     // order of arrival: mediaplayer finished → take the next from the queue.
-    // Each item is `{path, body}`: body is the text of the bubble that
-    // owns the file, so the "stop/speak" button follows the currently
-    // playing message (see speakingBubble).
+    // Each item is `{path, body}`: body is the exact text of the bubble that
+    // owns the file (the worker sends it after `kArgSep`), so the "stop/speak"
+    // button follows the message actually playing (see speakingBubble).
     property var ttsQueue: []
-
-    // Body of the last agent answer — binds auto-synthesised files
-    // to a bubble: the worker sends `[[tts]]<path>` after the corresponding text
-    // lines, so we remember the last answer. See ttsEnqueue/playNextTts.
-    property string pendingTtsBody: ""
 
     MediaPlayer {
         id: ttsPlayer
@@ -342,15 +348,14 @@ ApplicationWindow {
         app.ttsSynth = false
         ttsPlayer.play()
     }
-    function ttsEnqueue(path) {
+    function ttsEnqueue(path, body) {
         if (path === "" || path === undefined)
             return
-        // Which bubble the file belongs to: for the manual button this is the text
-        // we sent to synthesis (speakingBubble); for auto-TTS — the last
-        // agent answer (pendingTtsBody).
-        var body = app.speakingBubble
-        if ((body === "" || body === undefined) && app.pendingTtsBody !== "")
-            body = app.pendingTtsBody
+        // Which bubble the file belongs to is decided by the worker (it knows
+        // the exact answer text it synthesised) and travels with the path after
+        // `kArgSep`. Fall back to the text we sent for synthesis if absent.
+        if (body === "" || body === undefined)
+            body = app.speakingBubble
         app.ttsQueue.push({ path: path, body: body })
         if (!app.ttsPlaying)
             app.playNextTts()
@@ -452,9 +457,10 @@ ApplicationWindow {
                     }
 
                     // Live model reasoning ([[thinklive]]): the worker streams
-                    // deltas while the model thinks. Replace the trailing
-                    // [[think]] bubble in place (or start a new one) so the text
-                    // grows live instead of stacking a bubble per chunk.
+                    // deltas of `type:"reasoning"` parts while the model thinks.
+                    // Replace the trailing [[think]] bubble in place (or start a
+                    // new one) so the text grows live instead of stacking a
+                    // bubble per chunk — same as opencode's TUI.
                     if (app.lineIs(bodyTmp, app.kThinkLiveTag)) {
                         if (!app.showReasoning)
                             continue
@@ -481,6 +487,33 @@ ApplicationWindow {
                         continue
                     }
 
+                    // Live answer ([[answerlive]]): the worker streams deltas of
+                    // every answer text part while the model types. Grows/replaces
+                    // the trailing answer bubble in place so the answer is visible
+                    // live instead of appearing all at once on idle.
+                    if (app.lineIs(bodyTmp, app.kAnswerLiveTag)) {
+                        var aText = bodyTmp.substring(app.kAnswerLiveTag.length)
+                        var aLine = app.kTsOpen + app.msOf(line) + app.kTsClose + aText
+                        var aPrevBody = acc.length > 0 ? app.stripTs(acc[acc.length - 1]) : null
+                        var aPrevAns = aPrevBody === null ? null
+                                       : (app.lineIs(aPrevBody, app.kAnswerLiveTag)
+                                          ? aPrevBody.substring(app.kAnswerLiveTag.length)
+                                          : aPrevBody)
+                        if (aPrevAns !== null
+                            && !app.lineIs(aPrevBody, app.kUserPrefix)
+                            && !app.lineIs(aPrevBody, app.kSvcOpen)
+                            && !app.lineIs(aPrevBody, app.kErrOpen)
+                            && !app.lineIs(aPrevBody, app.kThinkTag)
+                            && (aText.indexOf(aPrevAns) === 0
+                                || aPrevAns.indexOf(aText) === 0)) {
+                            acc[acc.length - 1] = aLine
+                            accMutated = true
+                        } else {
+                            acc = acc.concat(aLine)
+                        }
+                        continue
+                    }
+
                     // Model reasoning ([[think]]) — Rust sends it as a line
                     // before the answer; hidden when the setting is off.
                     if (app.lineIs(bodyTmp, app.kThinkTag) && !app.showReasoning)
@@ -488,7 +521,6 @@ ApplicationWindow {
 
                     // Terminal recognition result — drop the loader.
                     if (app.lineIs(line, app.kSttTag))
-                        app.recognizing = false
                         app.recognizing = false
 
                     // Recognised (STT): into the input or straight to the agent — depending on settings.
@@ -509,35 +541,25 @@ ApplicationWindow {
                     }
 
                     // TTS synthesis done: put the file into the queue, do not add it to the feed.
+                    // Format: `[[tts]]<path>\u001f<body>` — the body is the exact
+                    // answer text the file belongs to (bound to its bubble).
                     if (app.lineIs(line, app.kTtsTag)) {
                         app.recognizing = false
-                        var ttsPath = line.substring(app.kTtsTag.length).replace(/^\s+/, "")
+                        var ttsRest = line.substring(app.kTtsTag.length).replace(/^\s+/, "")
+                        var ttsSep = ttsRest.indexOf(app.kArgSep)
+                        var ttsPath = ttsSep >= 0 ? ttsRest.substring(0, ttsSep) : ttsRest
+                        var ttsBody = ttsSep >= 0 ? ttsRest.substring(ttsSep + 1) : ""
                         if (ttsPath !== "")
-                            app.ttsEnqueue(ttsPath)
+                            app.ttsEnqueue(ttsPath, ttsBody)
                         continue
                     }
-
-                    // Remember the last agent answer — auto-synthesised
-                    // WAVs are bound to it (they come after the text). User
-                    // lines, reasoning and system bubbles (service/error)
-                    // are not counted as an answer.
-                    if (bodyTmp !== "" && !app.lineIs(bodyTmp, app.kUserPrefix)
-                        && !app.lineIs(bodyTmp, app.kThinkTag)
-                        && !app.lineIs(bodyTmp, app.kErrTag)
-                        && !app.lineIs(bodyTmp, app.kSvcTag))
-                        app.pendingTtsBody = bodyTmp.replace(/^\n+/, "")
 
                     acc = acc.concat(line)
                 }
             }
-            var accMax = 0
-            for (var ai = 0; ai < acc.length; ai++)
-                if (acc[ai].length > accMax) accMax = acc[ai].length
-bridge.gui_mark("feed n=" + acc.length + " max=" + accMax)
-                if (app.applyFeed(acc, accMutated))
-                bridge.gui_mark("feed-applied")
-            else
-                bridge.gui_mark("feed-same")
+            // Only re-push the model when it actually changed; the accMax debug
+            // scan was removed (it walked the whole feed on every poll).
+            app.applyFeed(acc, accMutated)
         }
         bridge.gui_mark("sessions")
         var sess = bridge.sessions_json()

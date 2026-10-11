@@ -19,6 +19,12 @@ pub const THINK_TAG: &str = "[[think]]";
 /// At `message.part.updated`/idle the worker sends the final reasoning once
 /// more via `[[think]]`/`[[thinklive]]` — never duplicated.
 pub const THINK_LIVE_TAG: &str = "[[thinklive]]";
+/// Live answer update. The worker streams `message.part.delta` chunks of every
+/// answer text part as `[[answerlive]]<text>` (reasoning, if any, travels in
+/// separate `type:"reasoning"` parts as `[[thinklive]]`). QML grows/replaces the
+/// trailing answer bubble in place, so the answer is visible WHILE the model
+/// types — the same way opencode's TUI renders a text part on each delta.
+pub const ANSWER_LIVE_TAG: &str = "[[answerlive]]";
 /// User-line prefix (goes after the timestamp).
 pub const USER_PREFIX: &str = ">>> ";
 /// Recognized STT-text label (worker sends `[[stt]] <text>`).

@@ -24,8 +24,6 @@ use opencode_client::voice;
 const MAIN_QML: &str = "qml/harbour-opencode.qml";
 /// Application name: determines both the data directory `SailfishApp::pathTo` and argv[0].
 const APP_NAME: &str = "harbour-opencode";
-/// How long to wait for `opencode serve` to be ready before showing the window.
-const SERVER_WAIT: Duration = Duration::from_secs(12);
 /// Minimum interval between live `[[thinklive]]` reasoning pushes. Throttles a
 /// long thinking phase so the QML queue is not flooded with hundreds of tiny
 /// chunks; the final full text is always sent once at reasoning-end/idle.
@@ -46,16 +44,22 @@ impl std::io::Write for Tee {
     }
 }
 
-/// Initialize logging: `RUST_LOG` (default `info`) + file in the application cache.
+/// Initialize logging: `RUST_LOG` (default `warn`) + file in the application cache.
 fn init_logging() {
+    // Default `warn`: `info` logged every SSE event (~1 s) and grew app.log
+    // tens of MB. Set `RUST_LOG=info` / `debug` for verbose troubleshooting.
     let mut builder = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
+        env_logger::Env::default().default_filter_or("warn"),
     );
     if let Some(home) = std::env::var_os("HOME") {
         let dir = std::path::PathBuf::from(home).join(".cache/harbour-opencode");
         let _ = std::fs::create_dir_all(&dir);
         install_panic_log(&dir);
         let path = dir.join("app.log");
+        // Rotate: keep the previous run, start a fresh file (bounds growth).
+        if path.exists() {
+            let _ = std::fs::rename(&path, dir.join("app.log.1"));
+        }
         if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
             builder.target(env_logger::Target::Pipe(Box::new(Tee(file))));
         }
@@ -91,6 +95,9 @@ fn humantime_since_epoch() -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
+    // Drop leftover temp files from a previous run (old /tmp WAVs, half-written
+    // TTS cache entries) so they don't accumulate.
+    voice::cleanup_tmp();
 
     // QML ←→ Rust bridge (created before Qt to pass queues to the worker).
     qml_register_type::<AppBridge>(
@@ -118,12 +125,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let permissions = bridge_pinned.borrow().permissions_handle();
     let questions = bridge_pinned.borrow().questions_handle();
     let settings = bridge_pinned.borrow().settings_handle();
-    let gui_mark = bridge_pinned.borrow().gui_mark_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
 
-    let (url_tx, url_rx) = mpsc::channel::<Option<String>>();
+    let (url_tx, _url_rx) = mpsc::channel::<Option<String>>();
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let env_base = std::env::var("OPENCODE_SERVER_URL").ok();
     let env_auth = std::env::var("OPENCODE_SERVER_PASSWORD").ok().map(|pw| {
@@ -208,30 +214,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .expect("spawn worker");
 
-    // Diagnostics: every 4s dump where the QML poll() is right now, so a stall
-    // of the main thread is pin-pointed to a single phase (pure std thread).
-    {
-        let gui_mark = gui_mark.clone();
-        std::thread::Builder::new()
-            .name("gui-mark-dump".into())
-            .spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(4));
-                let (s, age_s) = {
-                    let g = gui_mark.lock();
-                    match g {
-                        Ok(g) => (g.s.clone(), now_ms().saturating_sub(g.t) / 1000),
-                        Err(_) => (String::from("<poisoned>"), 0),
-                    }
-                };
-                log::info!("GUI-MARK [{s}] age={age_s}s");
-            })
-            .ok();
-    }
-
-    if url_rx.recv_timeout(SERVER_WAIT).ok().flatten().is_none() {
-        log::warn!("serve not ready within {:?} — starting in offline mode", SERVER_WAIT);
-        set_status(&status, "error");
-    }
+    // The window is shown immediately: the worker sets the live status
+    // ("connecting" → "idle"/"error") once `opencode serve` is ready, so a slow
+    // cold start no longer blocks the UI or flashes a false "error" badge.
 
     // QML runs on the main thread; exec() blocks until the window is closed.
     let mut app = QmlApp::application(APP_NAME.to_string());
@@ -382,6 +367,19 @@ async fn run_stream(
     // Timestamp of the last live reasoning push — throttle so a long thinking
     // phase does not flood the QML queue with hundreds of tiny lines.
     let mut last_reasoning_push: u64 = 0;
+    // Live text-part streaming: deltas of every answer text part accumulate
+    // per part.id and are pushed as `[[answerlive]]` while the model types,
+    // so the answer bubble grows in place (mirrors opencode's TUI rendering
+    // the text part on each delta). Without this the whole answer would pop
+    // in at once on idle. Reasoning, if any, arrives in separate
+    // `type:"reasoning"` parts and streams as `[[thinklive]]` (see above).
+    let mut text_live: std::collections::HashMap<String, String> = Default::default();
+    let mut last_answer_push: u64 = 0;
+    // Answer text part.ids in ARRIVAL ORDER. A turn may contain several text
+    // parts (text → tool → text); the map keyed by id cannot keep the sequence
+    // and sorting by value would shuffle the answer. Each part is also spoken
+    // as its OWN auto-TTS job, bound to its own bubble.
+    let mut text_order: Vec<String> = Vec::new();
     // Periodically refresh sessions list (tick every 200ms; query roughly every 3s).
     let mut ticks: u32 = 0;
 
@@ -449,7 +447,23 @@ async fn run_stream(
                         }
                         if let Some((mid, id, text)) = ev.payload.text_part() {
                             if assistant_messages.contains(mid) {
-                                parts.insert(id.to_string(), text);
+                                let was_live = text_live.contains_key(id);
+                                if parts.insert(id.to_string(), text.clone()).is_none() {
+                                    text_order.push(id.to_string());
+                                }
+                                // The finished text block (`message.part.updated` at
+                                // text-end) replaces the live-grown concatenation of
+                                // deltas with the exact final text — the same way a
+                                // finished reasoning block replaces its [[thinklive]]
+                                // bubble below. Without this the live bubble could
+                                // keep a slightly stale/throttled tail.
+                                if was_live && !text.trim().is_empty() {
+                                    if let Ok(mut q) = worker_pending.lock() {
+                                        let body =
+                                            format!("{ANSWER_LIVE_TAG}{}", text.trim_end());
+                                        q.push(proto_line(now_ms(), &body));
+                                    }
+                                }
                             }
                         }
                         // Reasoning as a FULL part (message.part.updated): empty at
@@ -497,16 +511,44 @@ async fn run_stream(
                                         }
                                     }
                                 }
+                            } else if properties.field == "text"
+                                && assistant_messages.contains(&properties.messageID)
+                                && !reasoning_part_ids.contains(id)
+                            {
+                                // Text-part deltas — the answer is streamed LIVE,
+                                // exactly like opencode's TUI grows the text part
+                                // on every `text-delta`. Previously these deltas
+                                // were discarded and the whole answer popped in at
+                                // idle (a "wall of text" instead of watching the
+                                // model type). The accumulated text travels as
+                                // [[answerlive]] and grows the trailing answer
+                                // bubble in place (throttled).
+                                let entry = text_live.entry(id.clone()).or_default();
+                                entry.push_str(&properties.delta);
+                                if !entry.trim().is_empty() {
+                                    let now = now_ms();
+                                    if now.saturating_sub(last_answer_push) >= REASONING_LIVE_MS {
+                                        last_answer_push = now;
+                                        if let Ok(mut q) = worker_pending.lock() {
+                                            let body =
+                                                format!("{ANSWER_LIVE_TAG}{}", entry.trim_end());
+                                            q.push(proto_line(now, &body));
+                                        }
+                                    }
+                                }
                             }
                         }
                         if let Some(session_id) = ev.payload.idle_session_id() {
                             if current_session.as_deref() == Some(session_id) {
                                 // Collect accumulated answer and send to QML.
-                                let mut ans: Vec<&String> = parts.values().collect();
-                                ans.sort();
-                                let text: String = ans.iter().map(|s| s.as_str()).collect();
+                                // Parts are joined in ARRIVAL order (see text_order).
+                                let text: String = text_order
+                                    .iter()
+                                    .filter_map(|pid| parts.get(pid))
+                                    .map(|s| s.as_str())
+                                    .collect();
                                 if !text.trim().is_empty() {
-                                    log::info!("push answer: {:?}", text);
+                                    log::debug!("push answer: {} chars", text.chars().count());
                                     // Reasoning: each block is its OWN [[think]] bubble.
                                     // Blocks streamed live already have their bubble in
                                     // the feed (grown via [[thinklive]]), so only blocks
@@ -530,27 +572,53 @@ async fn run_stream(
                                             }
                                         }
                                     }
-                                    if let Ok(mut q) = worker_pending.lock() {
-                                        q.push(proto_line(now_ms(), &text));
+                                    // Answer text: assembled from the parts above. Reasoning was
+                                    // already separated by PART TYPE (type:"reasoning"
+                                    // → its own bubble; text parts → answer), the
+                                    // same way opencode's TUI decides. Parts that
+                                    // streamed live were already finalized in place by
+                                    // their own `message.part.updated` (text-end),
+                                    // exactly like the live reasoning blocks above —
+                                    // re-pushing here would duplicate them. Parts that
+                                    // never streamed live are appended whole.
+                                    let answer_was_live = parts.keys().any(|k| text_live.contains_key(k));
+                                    if !answer_was_live {
+                                        if let Ok(mut q) = worker_pending.lock() {
+                                            q.push(proto_line(now_ms(), text.trim_end()));
+                                        }
                                     }
-                                    // Auto-TTS: whole answer (multiple bubbles of the same answer concatenated into `text` — see project notes).
-                                    // Do not TTS reasoning.
+                                    // Auto-TTS: speak each text part as its OWN file so
+                                    // it binds to its own bubble (a turn can contain
+                                    // several text parts around tool calls). Reasoning
+                                    // lives in separate parts and is never TTS'd. Text
+                                    // is passed trimmed so it matches the bubble body.
                                     let tts_mode = voice
                                         .tts_mode
                                         .lock()
                                         .map(|m| *m)
                                         .unwrap_or_default();
                                     if tts_mode == voice::TtsMode::Auto {
-                                        voice::tts_from_call(&voice, &text, &worker_pending).await;
+                                        for pid in &text_order {
+                                            if let Some(p) = parts.get(pid) {
+                                                let p = p.trim_end();
+                                                if !p.is_empty() {
+                                                    voice::tts_from_call(&voice, p, &worker_pending)
+                                                        .await;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 set_status(&status, "idle");
                                 parts.clear();
+                                text_live.clear();
+                                text_order.clear();
                                 reasonings.clear();
                                 reasoning_order.clear();
                                 reasoning_part_ids.clear();
                                 live_reasoned_ids.clear();
                                 last_reasoning_push = 0;
+                                last_answer_push = 0;
                                 refresh_sessions(&client, &sessions).await;
                             }
                         }
@@ -585,8 +653,11 @@ async fn run_stream(
                                     persist_last_session(Some(id));
                                     parts.clear();
                                     assistant_messages.clear();
-                                    reasonings.clear();
-                                    reasoning_order.clear();
+reasonings.clear();
+                                        reasoning_order.clear();
+                                        text_live.clear();
+                                        text_order.clear();
+                                        last_answer_push = 0;
                                     clear_tools(&dispatcher, &tools).await;
                                     refresh_sessions(&client, &sessions).await;
                                     set_current_session(&current_session_shared, &current_session);
@@ -609,6 +680,9 @@ async fn run_stream(
                             assistant_messages.clear();
                             reasonings.clear();
                             reasoning_order.clear();
+                            text_live.clear();
+                            text_order.clear();
+                            last_answer_push = 0;
                             clear_tools(&dispatcher, &tools).await;
                             load_history(&client, id, &worker_pending).await;
                             set_status(&status, "idle");
@@ -629,6 +703,9 @@ async fn run_stream(
                                         assistant_messages.clear();
                                         reasonings.clear();
                                         reasoning_order.clear();
+                                        text_live.clear();
+                                        text_order.clear();
+                                        last_answer_push = 0;
                                         clear_tools(&dispatcher, &tools).await;
                                         load_history(&client, new_id, &worker_pending).await;
                                         refresh_sessions(&client, &sessions).await;
@@ -867,6 +944,9 @@ async fn run_stream(
                                         assistant_messages.clear();
                                         reasonings.clear();
                                         reasoning_order.clear();
+                                        text_live.clear();
+                                        text_order.clear();
+                                        last_answer_push = 0;
                                         clear_tools(&dispatcher, &tools).await;
                                         set_current_session(&current_session_shared, &current_session);
                                         if let Ok(mut g) = todos.lock() {
@@ -1218,6 +1298,8 @@ async fn load_history(
                         let body = format!("{THINK_TAG}{}", reasoning.trim_end());
                         lines.push(proto_line(reasoning_ts, &body));
                     }
+                    // Answer = the text parts, exactly as opencode's TUI shows
+                    // them (reasoning was already separated above by PART TYPE).
                     lines.push(proto_line(created, &text));
                 }
             }
@@ -1374,9 +1456,6 @@ async fn refresh_tools_json(
         .collect();
     drop(st);
     let tj = serde_json::Value::Array(arr).to_string();
-    if tj.len() > 2 {
-        log::info!("DBG tools snapshot: {tj}");
-    }
     if let Ok(mut g) = tools.lock() {
         *g = tj;
     }

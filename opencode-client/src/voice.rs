@@ -29,14 +29,94 @@ const MODELS_SUBDIR: &str = "harbour-opencode/models";
 /// File that persists the STT/TTS/language choice (survives app restarts).
 const CONFIG_FILE: &str = "voice_state.json";
 const REC_RAW: &str = "/tmp/harbour-opencode-ptt.pcm";
-/// Temporary WAV for playback: synthesis (worker) → file → QML MediaPlayer.
-/// The name is unique per synthesis so several consecutive answers
-/// can be played in sequence (queue in QML).
-const TTS_OUT_DIR: &str = "/tmp";
+/// Counter for unique temporary names while a synthesis is in flight (the
+/// finished WAV is moved into the persistent cache afterwards).
 static TTS_SEQ: AtomicU64 = AtomicU64::new(0);
 
-fn tts_out_path() -> String {
-    format!("{TTS_OUT_DIR}/harbour-opencode-tts-{:03}.wav", TTS_SEQ.fetch_add(1, Ordering::SeqCst))
+/// Persistent TTS cache directory: `~/.cache/harbour-opencode/tts`.
+/// Finished answers live here (not in `/tmp`), keyed by model + spoken text,
+/// so replaying the same answer reuses the WAV instead of re-running piper.
+fn tts_cache_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".into());
+    let cache = std::env::var("XDG_CACHE_HOME").unwrap_or_else(|_| format!("{home}/.cache"));
+    Path::new(&cache).join("harbour-opencode").join("tts")
+}
+
+/// Stable cache path for a (model, spoken text) pair.
+fn tts_cache_path(model: &str, spoken: &str) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    model.hash(&mut h);
+    0u8.hash(&mut h);
+    spoken.hash(&mut h);
+    tts_cache_dir().join(format!("{:016x}.wav", h.finish()))
+}
+
+/// Upper bounds for the persistent TTS cache: at most this many WAV files and
+/// this many bytes on disk. When either cap is exceeded the least-recently-used
+/// files (by mtime) are dropped first.
+const MAX_TTS_FILES: usize = 200;
+const MAX_TTS_BYTES: u64 = 200 * 1024 * 1024; // 200 MB
+
+/// Trim the on-disk TTS cache down to the caps above (LRU by mtime). Called at
+/// startup and right after every successful synthesis, so the cache can never
+/// grow without bound. The just-written file is the newest and is therefore
+/// always kept, and eviction never runs while an old cached file is only being
+/// replayed.
+pub fn enforce_cache_limit() {
+    let dir = tts_cache_dir();
+    let Ok(rd) = std::fs::read_dir(&dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, u64, std::path::PathBuf)> = Vec::new();
+    let mut total: u64 = 0;
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("wav") {
+            continue;
+        }
+        let Ok(md) = e.metadata() else { continue };
+        if !md.is_file() {
+            continue;
+        }
+        let len = md.len();
+        let mt = md.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        total = total.saturating_add(len);
+        files.push((mt, len, p));
+    }
+    if files.len() <= MAX_TTS_FILES && total <= MAX_TTS_BYTES {
+        return;
+    }
+    files.sort_by_key(|f| f.0); // oldest first
+    let mut count = files.len();
+    for (_, len, p) in files {
+        if count <= MAX_TTS_FILES && total <= MAX_TTS_BYTES {
+            break;
+        }
+        if std::fs::remove_file(&p).is_ok() {
+            total = total.saturating_sub(len);
+            count -= 1;
+        }
+    }
+}
+
+/// Remove leftovers from previous runs: old `/tmp` recording/WAV files and
+/// half-written `.tmp-*` files in the TTS cache. Called once at startup.
+pub fn cleanup_tmp() {
+    if let Ok(rd) = std::fs::read_dir("/tmp") {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().starts_with("harbour-opencode-") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    if let Ok(rd) = std::fs::read_dir(tts_cache_dir()) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().starts_with(".tmp-") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    // Also shrink an overgrown cache from previous runs.
+    enforce_cache_limit();
 }
 
 /// Answer playback mode: [Auto] — speak every answer, [Button] — only
@@ -730,6 +810,8 @@ async fn run_stt_impl(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Ve
     for ctx in ctxs.iter().copied() {
         attempts += 1;
         let mut cmd = tokio::process::Command::new(WHISPER_BIN);
+        // Kill recognition if the app quits (or the task is dropped) mid-run.
+        cmd.kill_on_drop(true);
         cmd.arg("-m").arg(&model_file)
             .arg("-f").arg(&wav)
             .arg("-l").arg(&lang)
@@ -1045,14 +1127,36 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         }
         return;
     }
+    // The bubble text (echoed back to QML so the file binds to the exact
+    // bubble) differs from what piper reads: markdown is stripped for speech.
+    let body = text.trim_end().to_string();
     let text = strip_markdown_for_tts(text.trim());
     if text.is_empty() {
         return;
     }
-    let out_wav = tts_out_path();
+    let dir = tts_cache_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let final_wav = tts_cache_path(&id, &text);
+    // Cache hit: this exact answer was already synthesised for the same
+    // model — replay the file instead of running piper again.
+    if final_wav.exists() {
+        log::info!("TTS: из кэша {}", final_wav.display());
+        if let Ok(mut q) = pending.lock() {
+            q.push(format!("{TTS_TAG}{}{ARG_SEP}{body}", final_wav.display()));
+        }
+        return;
+    }
+    // Unique temp file in the cache dir; renamed into place on success, so a
+    // half-written WAV is never served from the cache.
+    let out_wav = dir.join(format!(
+        ".tmp-{}-{:03}.wav",
+        std::process::id(),
+        TTS_SEQ.fetch_add(1, Ordering::SeqCst)
+    ));
     log::info!(
-        "TTS: модель={id} piper={PIPER_BIN} текст={} байт → {out_wav}",
-        text.len()
+        "TTS: модель={id} piper={PIPER_BIN} текст={} байт → {}",
+        text.len(),
+        final_wav.display()
     );
 
     // We feed the text to piper via stdin, hence piped stdin + write.
@@ -1071,6 +1175,9 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // Kill piper if the app/quits (or the task is dropped) mid-synthesis:
+        // no orphaned child keeps the CPU busy after the window is gone.
+        .kill_on_drop(true)
         .spawn()
     {
         Ok(c) => c,
@@ -1107,9 +1214,19 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         let _ = std::fs::remove_file(&out_wav);
         return;
     }
-    log::info!("TTS: синтез готов, WAV в {out_wav}");
+    // Move the finished WAV into the cache under its content hash, so a repeat
+    // request for the same answer is served from the cache (no re-synthesis).
+    if let Err(e) = std::fs::rename(&out_wav, &final_wav) {
+        log::warn!("TTS: не переместить в кэш: {e}");
+        let _ = std::fs::remove_file(&out_wav);
+        return;
+    }
+    // Trim the cache if it outgrew its caps (LRU: the file we just wrote is
+    // the newest, so it is never the one evicted).
+    enforce_cache_limit();
+    log::info!("TTS: синтез готов → {}", final_wav.display());
     if let Ok(mut q) = pending.lock() {
-        q.push(format!("{TTS_TAG}{out_wav}"));
+        q.push(format!("{TTS_TAG}{}{ARG_SEP}{body}", final_wav.display()));
     }
 }
 
@@ -1124,25 +1241,26 @@ pub async fn tts_from_call(voice: &Arc<VoiceState>, text: &str, pending: &Arc<st
     }
     tokio::spawn(async move {
         // Serialize the engines: wait while STT or another synthesis is running (they share
-        // the CPU, and two piper jobs would race on their output files). A fresh "stop"
-        // press aborts the queued synthesis instead of starting it later.
+        // the CPU). The busy flag is claimed ATOMICALLY under its own lock — several
+        // auto-TTS parts may start at once. A fresh "stop" aborts the queued
+        // synthesis instead of starting it later.
         loop {
-            let busy = {
+            {
+                let mut tts = match voice2.tts_busy.lock() {
+                    Ok(g) => g,
+                    Err(_) => return,
+                };
                 let stt = voice2.stt_busy.lock().map(|b| *b).unwrap_or(false);
-                let tts = voice2.tts_busy.lock().map(|b| *b).unwrap_or(false);
-                stt || tts
-            };
-            if !busy {
-                break;
+                if !*tts && !stt {
+                    *tts = true;
+                    break;
+                }
             }
             if voice2.cancel_tts.lock().map(|c| *c).unwrap_or(false) {
                 log::info!("TTS: отменено во время ожидания");
                 return;
             }
             tokio::time::sleep(Duration::from_millis(120)).await;
-        }
-        if let Ok(mut b) = voice2.tts_busy.lock() {
-            *b = true;
         }
         run_tts(&voice2, &text, &pending2).await;
         if let Ok(mut b) = voice2.tts_busy.lock() {

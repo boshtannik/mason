@@ -103,8 +103,11 @@ impl ServerGuard {
         drop(tx);
 
         // Wait for the line "listening on http://127.0.0.1:PORT".
+        // Cold start of `opencode serve` (a Bun app) on a busy phone can take
+        // well over the old 5 s — a too-short wait killed it and left the UI on
+        // a red "error" badge. Give it up to 30 s.
         let mut port: Option<u16> = None;
-        const MAX_ATTEMPTS: u32 = 50;
+        const MAX_ATTEMPTS: u32 = 300;
         for _i in 0..MAX_ATTEMPTS {
             match child.try_wait() {
                 Ok(Some(status)) => {
@@ -131,7 +134,7 @@ impl ServerGuard {
             None => {
                 let _ = child.kill();
                 unregister_spawn(pid);
-                return Err("opencode serve не сообщил порт за 5s".into());
+                return Err("opencode serve не сообщил порт за 30s".into());
             }
         };
         let base = format!("http://127.0.0.1:{port}");
@@ -147,7 +150,7 @@ impl ServerGuard {
         // Wait for health.
         let client = OpenCodeClient::new(base.clone(), auth.clone());
         let mut ready = false;
-        for _ in 0..100 {
+        for _ in 0..200 {
             if client.health().await.unwrap_or(false) {
                 ready = true;
                 break;

@@ -18,6 +18,12 @@ Item {
         return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m
     }
 
+    // Same hue, slightly dulled: saturated atmosphere accents make the white
+    // bubble text hard to read, so the user bubble gets a dimmed variant.
+    function dimColor(c, f) {
+        return Qt.rgba(c.r * f, c.g * f, c.b * f, 1)
+    }
+
     // ── Mini-markdown → HTML (Text.RichText) ──────────────────────────────
     // No third-party libraries: headings, lists, quotes, bold/italic,
     // inline code and ``` fenced blocks. Rendering is basic but readable.
@@ -212,8 +218,22 @@ Item {
         clip: true
         spacing: Theme.paddingSmall
         delegate: messageDelegate
-        onCountChanged: positionViewAtEnd()
+        // Follow new messages only while the user is at the bottom. If they
+        // scrolled up to read history, the feed keeps growing below without
+        // yanking the view. `stickBottom` is re-evaluated on every user scroll
+        // (movementEnded) and reset when the session changes.
+        property bool stickBottom: true
+        onCountChanged: if (stickBottom) positionViewAtEnd()
+        onContentHeightChanged: if (stickBottom) positionViewAtEnd()
+        onMovementEnded: stickBottom = atYEnd
+        onFlickEnded: stickBottom = atYEnd
         VerticalScrollDecorator {}
+    }
+
+    // Opening/switching a session jumps back to the bottom (fresh history).
+    Connections {
+        target: appWindow
+        onCurrentSessionIdChanged: chatList.stickBottom = true
     }
 
     // Dev button that generates mock server errors: to test how errors
@@ -392,7 +412,7 @@ Item {
                 color: line.isThink
                        ? Theme.rgba(Theme.primaryColor, 0.05)
                        : (line.isUser
-                          ? Theme.highlightColor
+                          ? chatPage.dimColor(Theme.highlightColor, 0.80)
                           : (line.isError
                              ? Qt.rgba(0.85, 0.15, 0.15, 0.18)
                              : (line.isSvc
