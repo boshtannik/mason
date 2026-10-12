@@ -1284,7 +1284,9 @@ async fn load_history(
                                     reasoning.push_str(t);
                                 }
                             }
-                            _ => {}
+                            other => log::warn!(
+                                "history: part type {other:?} is not implemented in the UI (skipped)"
+                            ),
                         }
                     }
                 }

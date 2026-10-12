@@ -89,16 +89,15 @@ docker run --rm \
   ls -l "$HOME/cargo-cache/piper-aarch64/piper"
   # opencode CLI: we bundle the arm64 binary into the RPM (/usr/libexec/harbour-opencode/opencode)
   # so the client does not depend on a separately installed opencode or conflict with it via PATH.
-  # Version 1.18.30 is the only one that actually keeps `opencode serve` working on arm64
-  # (verified on the phone). 1.18.31/1.18.32 arm64 are Bun builds: `--version` without args prints
-  # 1.3.14 (Bun), and `serve` fails with "Script not found serve". Do NOT "upgrade" to a newer
-  # one until a native arm64 binary is back in the releases.
-  OC_VERSION="1.18.30"
-  # SHA-256 of the reference 1.18.30 binary (linux-arm64, verified on the phone).
+  # Version 1.19.0 ships a native arm64 build again (1.18.31/1.18.32 were Bun builds: `--version`
+  # without args printed 1.3.14 (Bun) and `serve` failed with "Script not found serve").
+  # 1.19.0 was verified on the phone: `--version`→1.19.0, `serve` starts, /global/health ok.
+  OC_VERSION="1.19.0"
+  # SHA-256 of the reference 1.19.0 binary (linux-arm64, verified on the phone).
   # We check not only the version but the file itself: protection against cache substitution
   # (e.g. a Bun binary with an already matching opencode.version), which could otherwise slip
   # the wrong "opencode" into the RPM.
-  OC_SHA256="01edb5839aa10d5b09133fedcb335a062ecad6e82552933bb14f71756f2b296b"
+  OC_SHA256="1e392db1d558a9eebaef618d4da3927f8b61fbcbd9a19513ed77f911142415df"
   OC_CLI="$HOME/cargo-cache/opencode-cli"
   # set -e: sha256sum of a missing file exits with 1 — that is not an error
   # but a signal that the file "needs downloading" (checked in the if below).

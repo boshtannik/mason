@@ -19,7 +19,7 @@ BuildRequires:  qt5-qttools-linguist
 # Do NOT let rpmbuild trim/strip the bundle. brp-strip (and find-debuginfo)
 # trim the non-allocated sections of the Bun binary opencode, after which it
 # loses the built-in CLI ("serve") and fails with "'Script not found serve'"
-# (--version instead of 1.18.30 shows 1.3.14 — Bun's own version). Therefore:
+# (--version instead of the real version shows 1.3.14 — Bun's own version). Therefore:
 %global debug_package %{nil}
 %global __strip /bin/true
 

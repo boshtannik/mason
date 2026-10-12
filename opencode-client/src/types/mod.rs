@@ -1,3 +1,4 @@
+pub mod config;
 pub mod event;
 pub mod message;
 pub mod permission;
@@ -5,6 +6,7 @@ pub mod question;
 pub mod session;
 pub mod tool;
 
+pub use config::Config;
 pub use event::GlobalEvent;
 pub use message::Message;
 pub use permission::Permission;

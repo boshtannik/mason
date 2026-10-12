@@ -115,18 +115,24 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
             state.sessions.remove(&properties.info.id);
             true
         }
-        // Other events don't change state yet — listed exhaustively.
+        // Handled elsewhere in the event loop (text/reasoning streaming and
+        // error classification in main.rs) — intentionally no warning here.
+        Event::MessageUpdated { .. }
+        | Event::MessagePartDelta { .. }
+        | Event::SessionError { .. } => false,
+        // Everything else is not yet implemented in the UI. These branches are
+        // listed exhaustively (no catch-all) so the compiler forces us to
+        // revisit them when the event union grows. Each one is logged so the
+        // logs make the degree of agreement between our UI and the native
+        // server visible. See AGENTS.md ("Принципы").
         Event::ModelsDevRefreshed { .. }
         | Event::IntegrationUpdated { .. }
         | Event::IntegrationConnectionUpdated { .. }
         | Event::CatalogUpdated { .. }
         | Event::SessionCompacted { .. }
         | Event::SessionDiff { .. }
-        | Event::SessionError { .. }
-        | Event::MessageUpdated { .. }
         | Event::MessageRemoved { .. }
         | Event::MessagePartRemoved { .. }
-        | Event::MessagePartDelta { .. }
         | Event::SessionNextAgentSwitched { .. }
         | Event::SessionNextModelSwitched { .. }
         | Event::SessionNextMoved { .. }
@@ -189,7 +195,28 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState) -> bool {
         | Event::ServerConnected { .. } | Event::ServerHeartbeat { .. }
         | Event::GlobalDisposed { .. }
         | Event::ServerInstanceDisposed { .. }
-        | Event::Sync { .. } => false,
+        | Event::Sync { .. } => {
+            note_unimplemented(event);
+            false
+        }
+    }
+}
+
+/// Logs (once per event type) that a dispatched event is not yet implemented in
+/// the UI. Warning on the first occurrence keeps the "not implemented" surface
+/// visible in the logs without flooding them on high-frequency events.
+fn note_unimplemented(event: &Event) {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+
+    static SEEN: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
+    let name = event.type_name();
+    let first_time = seen.lock().map(|mut set| set.insert(name)).unwrap_or(true);
+    if first_time {
+        log::warn!("event '{name}' is not implemented in the UI yet — dispatch branch ignores it");
+    } else {
+        log::debug!("event '{name}' (not implemented) ignored again");
     }
 }
 

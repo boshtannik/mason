@@ -152,6 +152,22 @@ Dev-only scripts (`restart-probe.sh`, `opencode-client/qml/do-probe.sh`,
 - **TTS**: `piper`, with a statically built aarch64 runtime bundled by the spec.
 - Model catalogue: `opencode-client/assets/models.json`.
 
+## Development principles
+
+We model the server surface faithfully and keep it auditable:
+
+- **Enums are exhaustive.** Domain types mirror the server's type unions exactly
+  (`opencode-client/src/types/event.rs`) with no `Unknown` fallback, so the
+  compiler forces us to revisit every `match` when the union grows.
+- **Match arms are fully enumerated**, and branches that are not implemented yet
+  are **not silently ignored**: they log a warning naming the branch and marking
+  it as not implemented. The logs therefore show how far our UI has diverged from
+  the native server (see `opencode-client/src/event/dispatcher.rs`).
+- The configuration-file model (`Config`) is mirrored in
+  `opencode-client/src/types/config.rs`.
+
+See [AGENTS.md](AGENTS.md) for the full statement.
+
 ## License
 
 MIT. See [LICENSE](LICENSE) and [AUTHORS.md](AUTHORS.md).

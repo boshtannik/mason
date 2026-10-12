@@ -292,6 +292,106 @@ pub enum Event {
     },
 }
 
+impl Event {
+    /// Wire name (`type` field) of the event. Exhaustive by construction so
+    /// that logging / matching never falls back to a catch-all.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Event::ModelsDevRefreshed { .. } => "models-dev.refreshed",
+            Event::IntegrationUpdated { .. } => "integration.updated",
+            Event::IntegrationConnectionUpdated { .. } => "integration.connection.updated",
+            Event::CatalogUpdated { .. } => "catalog.updated",
+            Event::SessionCreated { .. } => "session.created",
+            Event::SessionUpdated { .. } => "session.updated",
+            Event::SessionDeleted { .. } => "session.deleted",
+            Event::MessageUpdated { .. } => "message.updated",
+            Event::MessageRemoved { .. } => "message.removed",
+            Event::MessagePartUpdated { .. } => "message.part.updated",
+            Event::MessagePartRemoved { .. } => "message.part.removed",
+            Event::SessionNextAgentSwitched { .. } => "session.next.agent.switched",
+            Event::SessionNextModelSwitched { .. } => "session.next.model.switched",
+            Event::SessionNextMoved { .. } => "session.next.moved",
+            Event::SessionNextPrompted { .. } => "session.next.prompted",
+            Event::SessionNextPromptAdmitted { .. } => "session.next.prompt.admitted",
+            Event::SessionNextContextUpdated { .. } => "session.next.context.updated",
+            Event::SessionNextSynthetic { .. } => "session.next.synthetic",
+            Event::SessionNextShellStarted { .. } => "session.next.shell.started",
+            Event::SessionNextShellEnded { .. } => "session.next.shell.ended",
+            Event::SessionNextStepStarted { .. } => "session.next.step.started",
+            Event::SessionNextStepEnded { .. } => "session.next.step.ended",
+            Event::SessionNextStepFailed { .. } => "session.next.step.failed",
+            Event::SessionNextTextStarted { .. } => "session.next.text.started",
+            Event::SessionNextTextDelta { .. } => "session.next.text.delta",
+            Event::SessionNextTextEnded { .. } => "session.next.text.ended",
+            Event::SessionNextReasoningStarted { .. } => "session.next.reasoning.started",
+            Event::SessionNextReasoningDelta { .. } => "session.next.reasoning.delta",
+            Event::SessionNextReasoningEnded { .. } => "session.next.reasoning.ended",
+            Event::SessionNextToolInputStarted { .. } => "session.next.tool.input.started",
+            Event::SessionNextToolInputDelta { .. } => "session.next.tool.input.delta",
+            Event::SessionNextToolInputEnded { .. } => "session.next.tool.input.ended",
+            Event::SessionNextToolCalled { .. } => "session.next.tool.called",
+            Event::SessionNextToolProgress { .. } => "session.next.tool.progress",
+            Event::SessionNextToolSuccess { .. } => "session.next.tool.success",
+            Event::SessionNextToolFailed { .. } => "session.next.tool.failed",
+            Event::SessionNextRetried { .. } => "session.next.retried",
+            Event::SessionNextCompactionStarted { .. } => "session.next.compaction.started",
+            Event::SessionNextCompactionDelta { .. } => "session.next.compaction.delta",
+            Event::SessionNextCompactionEnded { .. } => "session.next.compaction.ended",
+            Event::SessionNextRevertStaged { .. } => "session.next.revert.staged",
+            Event::SessionNextRevertCleared { .. } => "session.next.revert.cleared",
+            Event::SessionNextRevertCommitted { .. } => "session.next.revert.committed",
+            Event::MessagePartDelta { .. } => "message.part.delta",
+            Event::SessionDiff { .. } => "session.diff",
+            Event::SessionError { .. } => "session.error",
+            Event::InstallationUpdated { .. } => "installation.updated",
+            Event::InstallationUpdateAvailable { .. } => "installation.update-available",
+            Event::FileEdited { .. } => "file.edited",
+            Event::ReferenceUpdated { .. } => "reference.updated",
+            Event::PermissionV2Asked { .. } => "permission.v2.asked",
+            Event::PermissionV2Replied { .. } => "permission.v2.replied",
+            Event::PluginAdded { .. } => "plugin.added",
+            Event::ProjectDirectoriesUpdated { .. } => "project.directories.updated",
+            Event::FileWatcherUpdated { .. } => "file.watcher.updated",
+            Event::PtyCreated { .. } => "pty.created",
+            Event::PtyUpdated { .. } => "pty.updated",
+            Event::PtyExited { .. } => "pty.exited",
+            Event::PtyDeleted { .. } => "pty.deleted",
+            Event::QuestionV2Asked { .. } => "question.v2.asked",
+            Event::QuestionV2Replied { .. } => "question.v2.replied",
+            Event::QuestionV2Rejected { .. } => "question.v2.rejected",
+            Event::TodoUpdated { .. } => "todo.updated",
+            Event::LspUpdated { .. } => "lsp.updated",
+            Event::PermissionAsked { .. } => "permission.asked",
+            Event::PermissionReplied { .. } => "permission.replied",
+            Event::TuiPromptAppend { .. } => "tui.prompt.append",
+            Event::TuiCommandExecute { .. } => "tui.command.execute",
+            Event::TuiToastShow { .. } => "tui.toast.show",
+            Event::TuiSessionSelect { .. } => "tui.session.select",
+            Event::McpToolsChanged { .. } => "mcp.tools.changed",
+            Event::McpBrowserOpenFailed { .. } => "mcp.browser.open.failed",
+            Event::CommandExecuted { .. } => "command.executed",
+            Event::ProjectUpdated { .. } => "project.updated",
+            Event::SessionStatus { .. } => "session.status",
+            Event::SessionIdle { .. } => "session.idle",
+            Event::QuestionAsked { .. } => "question.asked",
+            Event::QuestionReplied { .. } => "question.replied",
+            Event::QuestionRejected { .. } => "question.rejected",
+            Event::SessionCompacted { .. } => "session.compacted",
+            Event::VcsBranchUpdated { .. } => "vcs.branch.updated",
+            Event::WorkspaceReady { .. } => "workspace.ready",
+            Event::WorkspaceFailed { .. } => "workspace.failed",
+            Event::WorkspaceStatus { .. } => "workspace.status",
+            Event::WorktreeReady { .. } => "worktree.ready",
+            Event::WorktreeFailed { .. } => "worktree.failed",
+            Event::ServerConnected { .. } => "server.connected",
+            Event::ServerHeartbeat { .. } => "server.heartbeat",
+            Event::GlobalDisposed { .. } => "global.disposed",
+            Event::ServerInstanceDisposed { .. } => "server.instance.disposed",
+            Event::Sync { .. } => "sync",
+        }
+    }
+}
+
 /// Nested event of the aggregate (sync). type has a version suffix (e.g. `.1`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
@@ -878,7 +978,11 @@ pub fn human_session_error(error: Option<&serde_json::Value>) -> String {
             }
         }
         _ => {
-            // Unknown type — return the raw object (for debugging new fields).
+            // Unknown type — log it (visibility into new server error kinds)
+            // and return the raw object (for debugging new fields).
+            log::warn!(
+                "session.error: error type {name:?} is not implemented in the UI (showing raw object)"
+            );
             if let Some(e) = e.as_object() {
                 serde_json::to_string(e).unwrap_or_else(|_| "ошибка сервера".into())
             } else if !name.is_empty() {
