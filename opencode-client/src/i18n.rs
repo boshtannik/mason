@@ -36,6 +36,11 @@ pub const K_TTS_MODELS_NONE: &str = "No TTS models — download a new one";
 pub const K_STT_RECORD_FINISHED: &str = "Recording finished";
 pub const K_CATALOG_REFRESHED: &str = "Voice model catalog updated: %1 models available";
 pub const K_CATALOG_REFRESH_FAILED: &str = "Failed to update the model catalog: %1";
+pub const K_AUTH_SAVED: &str = "OpenCode API key saved";
+pub const K_AUTH_EMPTY: &str = "Enter the API key first";
+pub const K_AUTH_SAVE_FAILED: &str = "Failed to save the OpenCode API key: %1";
+pub const K_AUTH_SIGNED_IN: &str = "Signed in to OpenCode";
+pub const K_AUTH_SIGNIN_FAILED: &str = "OpenCode sign-in failed: %1";
 
 /// Current time in unix milliseconds.
 pub fn now_ms() -> u64 {

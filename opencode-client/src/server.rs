@@ -25,7 +25,7 @@ pub struct ServerConfig {
     pub bin: Option<std::path::PathBuf>,
     /// Extra arguments (--pure to run without plugins).
     pub args: Vec<String>,
-    /// Working directory for opencode serve (cwd). Defaults to $HOME/mason
+    /// Working directory for opencode serve (cwd). Defaults to $HOME/opencode-home
     pub cwd: Option<PathBuf>,
 }
 
@@ -62,7 +62,7 @@ impl ServerGuard {
         let cwd = cfg
             .cwd
             .clone()
-            .unwrap_or_else(|| PathBuf::from(&home).join("mason"));
+            .unwrap_or_else(|| PathBuf::from(&home).join("opencode-home"));
         let _ = std::fs::create_dir_all(&cwd);
         cmd.current_dir(&cwd)
             .env("HOME", &home)
@@ -335,7 +335,7 @@ fn reap_orphans() {
 
 /// Finds the opencode binary. Priority: explicit path → OPENCODE_BIN → bundled in the RPM
 /// (ours, isolated) → usual system locations → PATH.
-fn resolve_bin(explicit: Option<std::path::PathBuf>) -> std::path::PathBuf {
+pub fn resolve_bin(explicit: Option<std::path::PathBuf>) -> std::path::PathBuf {
     if let Some(b) = explicit {
         return b;
     }

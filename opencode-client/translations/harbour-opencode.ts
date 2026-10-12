@@ -617,6 +617,26 @@ long press — remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>OpenCode API key saved</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter the API key first</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to save the OpenCode API key: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signed in to OpenCode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OpenCode sign-in failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Copied</source>
         <translation type="unfinished"></translation>
     </message>

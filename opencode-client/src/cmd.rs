@@ -85,6 +85,15 @@ pub enum Cmd {
         id: String,
         mode: String,
     },
+    /// Store an API-key credential for a provider (PUT /auth/{provider}).
+    SetProviderKey {
+        provider: String,
+        key: String,
+    },
+    /// Start the in-app OpenCode Console device login (`opencode console login`).
+    ConsoleLogin,
+    /// Cancel an in-progress device login.
+    ConsoleLoginCancel,
     VoiceLang {
         id: String,
     },

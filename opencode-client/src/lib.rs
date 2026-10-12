@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 pub mod api;
+pub mod auth;
 #[cfg(feature = "voice")]
 pub mod audio;
 pub mod bridge;

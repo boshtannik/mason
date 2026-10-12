@@ -4,6 +4,28 @@ import Sailfish.Silica 1.0
 Item {
     id: globalSettingsPage
 
+    property bool providerKeySet: false
+    // OpenCode Console device-login state, mirrored from the root poll().
+    readonly property var login: (typeof appWindow !== "undefined" && appWindow
+                                  && appWindow.consoleLogin)
+                                 ? appWindow.consoleLogin
+                                 : ({ "state": "idle", "url": "", "code": "", "message": "" })
+
+    Component.onCompleted: refreshProviderKey()
+
+    function refreshProviderKey() {
+        if (typeof appWindow !== "undefined" && appWindow)
+            providerKeySet = appWindow.providerKeySet()
+    }
+
+    function saveProviderKey() {
+        if (typeof appWindow === "undefined" || !appWindow || apiKeyField.text.length === 0)
+            return
+        appWindow.saveProviderKey(apiKeyField.text)
+        apiKeyField.text = ""
+        keyRefreshTimer.restart()
+    }
+
     property var appWindow
 
     // Syncing the PTT position dropdown. The currentIndex binding breaks
@@ -167,26 +189,152 @@ Item {
                 }
             }
 
+            SectionHeader { text: qsTr("OpenCode account") }
+
+            Label {
+                visible: globalSettingsPage.login.state !== "waiting"
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Sign in to your opencode.ai account. The app shows a code to enter in the browser.")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+            }
+
+            Button {
+                visible: globalSettingsPage.login.state !== "waiting"
+                text: qsTr("Sign in with OpenCode")
+                onClicked: globalSettingsPage.appWindow.startConsoleLogin()
+            }
+
+            Label {
+                visible: globalSettingsPage.login.state === "waiting"
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Enter this code on the opened page:")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+            }
+
+            Label {
+                visible: globalSettingsPage.login.state === "waiting"
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: globalSettingsPage.login.code
+                font.pixelSize: Theme.fontSizeExtraLarge
+                font.bold: true
+                color: Theme.highlightColor
+            }
+
+            Button {
+                visible: globalSettingsPage.login.state === "waiting"
+                        && globalSettingsPage.login.url !== ""
+                text: qsTr("Open browser again")
+                onClicked: Qt.openUrlExternally(globalSettingsPage.login.url)
+            }
+
+            Row {
+                visible: globalSettingsPage.login.state === "waiting"
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: Theme.paddingMedium
+                BusyIndicator {
+                    size: BusyIndicatorSize.Small
+                    running: parent.visible
+                }
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Waiting for authorization…")
+                    color: Theme.secondaryColor
+                    font.pixelSize: Theme.fontSizeExtraSmall
+                }
+            }
+
+            Button {
+                visible: globalSettingsPage.login.state === "waiting"
+                text: qsTr("Cancel")
+                onClicked: globalSettingsPage.appWindow.cancelConsoleLogin()
+            }
+
+            Label {
+                visible: globalSettingsPage.login.state === "success"
+                         || globalSettingsPage.login.state === "error"
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: globalSettingsPage.login.state === "success"
+                      ? qsTr("Signed in ✓")
+                      : qsTr("Sign-in failed") + (globalSettingsPage.login.message !== ""
+                            ? ": " + globalSettingsPage.login.message : "")
+                wrapMode: Text.Wrap
+                color: globalSettingsPage.login.state === "success"
+                       ? Theme.highlightColor : Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+            }
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Or paste a service-account API key:")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+            }
+
+            TextField {
+                id: apiKeyField
+                width: parent.width
+                echoMode: TextInput.Password
+                placeholderText: qsTr("API key")
+                label: qsTr("OpenCode API key")
+                EnterKey.enabled: text.length > 0
+                EnterKey.iconSource: "image://theme/icon-m-enter-accept"
+                EnterKey.onClicked: {
+                    globalSettingsPage.saveProviderKey()
+                    focus = false
+                }
+            }
+
+            Button {
+                text: qsTr("Save key")
+                enabled: apiKeyField.text.length > 0
+                onClicked: globalSettingsPage.saveProviderKey()
+            }
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: globalSettingsPage.providerKeySet
+                      ? qsTr("Key is set ✓") : qsTr("No key saved")
+                color: globalSettingsPage.providerKeySet
+                       ? Theme.highlightColor : Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+            }
+
+            Timer {
+                id: keyRefreshTimer
+                interval: 1500
+                onTriggered: globalSettingsPage.refreshProviderKey()
+            }
+
             SectionHeader { text: qsTr("General") }
 
             TextField {
                 id: workdirField
                 width: parent.width
                 text: (typeof appWindow.workdir !== "undefined") ? appWindow.workdir : ""
-                placeholderText: qsTr("e.g. /home/defaultuser/mason")
+                placeholderText: qsTr("e.g. /home/defaultuser/opencode-home")
                 label: qsTr("Working directory (restart required)")
                 onActiveFocusChanged: {
-                    if (!activeFocus && typeof appWindow.bridge !== "undefined" && typeof appWindow.workdir !== "undefined") {
+                    if (!activeFocus && typeof appWindow !== "undefined" && appWindow) {
                         appWindow.workdir = text
-                        appWindow.bridge.set_workdir(text)
+                        appWindow.setWorkdir(text)
                     }
                 }
                 EnterKey.enabled: text.length > 0
                 EnterKey.iconSource: "image://theme/icon-m-enter-accept"
                 EnterKey.onClicked: {
-                    if (typeof appWindow.bridge !== "undefined" && typeof appWindow.workdir !== "undefined") {
+                    if (typeof appWindow !== "undefined" && appWindow) {
                         appWindow.workdir = text
-                        appWindow.bridge.set_workdir(text)
+                        appWindow.setWorkdir(text)
                     }
                     focus = false
                 }

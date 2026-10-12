@@ -650,6 +650,26 @@ long press — remove</source>
         <translation>Каталог не обновился: %1</translation>
     </message>
     <message>
+        <source>OpenCode API key saved</source>
+        <translation>Ключ OpenCode сохранён</translation>
+    </message>
+    <message>
+        <source>Enter the API key first</source>
+        <translation>Сначала введите API-ключ</translation>
+    </message>
+    <message>
+        <source>Failed to save the OpenCode API key: %1</source>
+        <translation>Не удалось сохранить API-ключ OpenCode: %1</translation>
+    </message>
+    <message>
+        <source>Signed in to OpenCode</source>
+        <translation>Вход в OpenCode выполнен</translation>
+    </message>
+    <message>
+        <source>OpenCode sign-in failed: %1</source>
+        <translation>Не удалось войти в OpenCode: %1</translation>
+    </message>
+    <message>
         <source>Copied</source>
         <translation>Скопировано</translation>
     </message>

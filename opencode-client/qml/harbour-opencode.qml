@@ -72,6 +72,10 @@ ApplicationWindow {
                                      ? soundOnPermissionSetting.value : true
     property bool sendImmediately: sendImmediatelySetting.value !== undefined
                                    ? sendImmediatelySetting.value : false
+    // OpenCode Console device-login state (worker → QML): {state,url,code,message}.
+    property var consoleLogin: ({ "state": "idle", "url": "", "code": "", "message": "" })
+    // Verification URL already opened in the browser (auto-open only once).
+    property string consoleLoginOpenedUrl: ""
     // ── Worker ↔ QML protocol markers ─────────────────────────────────────────
     // Mirror of opencode-client/src/markers.rs. Change both files in sync:
     // conditions compare via these constants, never via raw strings — this
@@ -720,6 +724,24 @@ ApplicationWindow {
                 console.log("settings parse error: " + e)
             }
         }
+        bridge.gui_mark("login")
+        var lj = bridge.console_login_json()
+        if (lj !== "" && lj !== undefined) {
+            try {
+                var lo = JSON.parse(lj)
+                app.consoleLogin = lo
+                // Open the verification page automatically, exactly once per URL.
+                if (lo.state === "waiting" && lo.url !== ""
+                        && lo.url !== app.consoleLoginOpenedUrl) {
+                    app.consoleLoginOpenedUrl = lo.url
+                    Qt.openUrlExternally(lo.url)
+                }
+                if (lo.state !== "waiting")
+                    app.consoleLoginOpenedUrl = ""
+            } catch (e) {
+                console.log("console login parse error: " + e)
+            }
+        }
         bridge.gui_mark("end")
     }
 
@@ -887,6 +909,15 @@ ApplicationWindow {
     function summarizeSession(id) { bridge.summarize_session(id) }
     function abortSession(id) { bridge.abort_session(id) }
     function setModel(id, provider, model) { bridge.set_model(id, provider, model) }
+
+    // The `bridge` object is a dynamic property of this root window, visible only
+    // as a bare identifier in THIS file. Pages must go through these wrappers.
+    function setWorkdir(path) { bridge.set_workdir(path) }
+    function authUrl() { return bridge.auth_url() }
+    function providerKeySet() { return bridge.provider_key_set() }
+    function saveProviderKey(key) { bridge.save_provider_key(key) }
+    function startConsoleLogin() { bridge.start_console_login() }
+    function cancelConsoleLogin() { bridge.cancel_console_login() }
 
     function setShowReasoning(v) {
         app.showReasoning = !!v
@@ -1257,6 +1288,8 @@ ApplicationWindow {
             Rectangle {
                 id: questionOverlay
                 visible: app.questionOverlayVisible && app.pendingQuestions.length > 0
+                         && app.pendingQuestions[0] !== undefined
+                         && app.pendingQuestions[0].questions !== undefined
                 anchors.fill: parent
                 color: Qt.rgba(0, 0, 0, 0.7)
                 z: 25

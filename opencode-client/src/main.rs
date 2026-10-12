@@ -125,6 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let permissions = bridge_pinned.borrow().permissions_handle();
     let questions = bridge_pinned.borrow().questions_handle();
     let settings = bridge_pinned.borrow().settings_handle();
+    let console_login = bridge_pinned.borrow().console_login_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
@@ -198,10 +199,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_models,
                             worker_sounds,
                             worker_voice,
-                        worker_tools,
+                            worker_tools,
                         worker_permissions,
                         worker_questions,
                         worker_settings,
+                        console_login,
                         worker_stop_rx,
                     )
                     .await
@@ -261,6 +263,7 @@ async fn run_worker(
     permissions: Arc<std::sync::Mutex<String>>,
     questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
+    console_login: opencode_client::auth::ConsoleLogin,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     loop {
@@ -288,6 +291,7 @@ async fn run_worker(
                 permissions.clone(),
                 questions.clone(),
                 settings.clone(),
+                console_login.clone(),
             ) => {
                 match r {
                     Ok(()) => log::warn!("SSE stream ended, reconnecting…"),
@@ -321,6 +325,7 @@ async fn run_stream(
     permissions: Arc<std::sync::Mutex<String>>,
     questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
+    console_login: opencode_client::auth::ConsoleLogin,
 ) -> Result<(), String> {
     let client = api::OpenCodeClient::new(base.clone(), auth.clone());
 
@@ -997,6 +1002,59 @@ reasonings.clear();
                             if let Ok(mut g) = settings.lock() {
                                 *g = st.to_json();
                             }
+                        }
+                        Cmd::SetProviderKey { provider, key } => {
+                            let key = key.trim().to_string();
+                            if key.is_empty() {
+                                if let Ok(mut q) = worker_pending.lock() {
+                                    q.push(svc_line(now_ms(), i18n::K_AUTH_EMPTY, &[]));
+                                }
+                            } else {
+                                match client.set_api_key(&provider, &key).await {
+                                    Ok(()) => {
+                                        log::info!("auth: saved API key for provider {provider:?}");
+                                        if let Ok(mut q) = worker_pending.lock() {
+                                            q.push(svc_line(now_ms(), i18n::K_AUTH_SAVED, &[]));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!("auth: failed to save key for {provider:?}: {e}");
+                                        if let Ok(mut q) = worker_pending.lock() {
+                                            q.push(err_line(now_ms(), i18n::K_AUTH_SAVE_FAILED, &[e]));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Cmd::ConsoleLogin => {
+                            if let Err(e) = console_login.start() {
+                                log::warn!("console login: {e}");
+                            }
+                        }
+                        Cmd::ConsoleLoginCancel => {
+                            console_login.cancel();
+                            log::info!("console login: cancelled");
+                        }
+                    }
+                }
+
+                // Device login finished: on success reload the server config so
+                // the fresh account (org/models) is used, then tell the user.
+                if let Some(ok) = console_login.take_finished() {
+                    let msg = console_login.message();
+                    if ok {
+                        log::info!("console login: success, disposing instances to reload config");
+                        if let Err(e) = client.global_dispose().await {
+                            log::warn!("console login: /global/dispose failed: {e}");
+                        }
+                        refresh_models(&client, &models).await;
+                        if let Ok(mut q) = worker_pending.lock() {
+                            q.push(svc_line(now_ms(), i18n::K_AUTH_SIGNED_IN, &[]));
+                        }
+                    } else {
+                        log::warn!("console login: failed: {msg}");
+                        if let Ok(mut q) = worker_pending.lock() {
+                            q.push(err_line(now_ms(), i18n::K_AUTH_SIGNIN_FAILED, &[msg]));
                         }
                     }
                 }

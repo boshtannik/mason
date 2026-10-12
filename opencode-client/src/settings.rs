@@ -23,7 +23,7 @@ impl Default for Settings {
 
 /// Default working directory for `opencode serve`.
 pub fn default_workdir() -> String {
-    "/home/defaultuser/mason".to_string()
+    "/home/defaultuser/opencode-home".to_string()
 }
 
 fn settings_path() -> PathBuf {

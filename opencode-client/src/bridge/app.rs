@@ -78,6 +78,9 @@ pub struct AppBridge {
     /// QML poll() progress marker (diagnostics), written by the main thread.
     #[allow(dead_code)]
     gui_mark_shared: Arc<Mutex<GuiMark>>,
+    /// OpenCode Console device-login state/child (shared with the worker).
+    #[allow(dead_code)]
+    console_login: crate::auth::ConsoleLogin,
 
     /// QML: take and clear accumulated messages (polling).
     /// We separate elements with the Record Separator control character (`\x1e`), not
@@ -321,6 +324,43 @@ pub struct AppBridge {
         log::info!("QML set_workdir -> {path:?}");
         self.push_command(Cmd::SetWorkdir { workdir: path }.to_value());
     }),
+    /// QML: URL of the OpenCode API-key page (for `Qt.openUrlExternally`).
+    auth_url: qt_method!(fn auth_url(&self) -> QString {
+        QString::from(crate::auth::OPENCODE_AUTH_URL)
+    }),
+    /// QML: whether an OpenCode provider key is already stored on the device.
+    provider_key_set: qt_method!(fn provider_key_set(&self) -> bool {
+        crate::auth::has_api_key(crate::auth::OPENCODE_PROVIDER)
+    }),
+    /// QML: store the OpenCode provider API key (via the server's PUT /auth).
+    save_provider_key: qt_method!(fn save_provider_key(&self, key: QString) {
+        let key = key.to_string().trim().to_string();
+        log::info!("QML save_provider_key (len={})", key.len());
+        if !key.is_empty() {
+            self.push_command(
+                Cmd::SetProviderKey {
+                    provider: crate::auth::OPENCODE_PROVIDER.to_string(),
+                    key,
+                }
+                .to_value(),
+            );
+        }
+    }),
+    /// QML: current OpenCode Console device-login state as JSON
+    /// (`{state,url,code,message}`).
+    console_login_json: qt_method!(fn console_login_json(&self) -> QString {
+        QString::from(self.console_login.status_json())
+    }),
+    /// QML: start the device login (`opencode console login`).
+    start_console_login: qt_method!(fn start_console_login(&self) {
+        log::info!("QML start_console_login");
+        self.push_command(Cmd::ConsoleLogin.to_value());
+    }),
+    /// QML: cancel an in-progress device login.
+    cancel_console_login: qt_method!(fn cancel_console_login(&self) {
+        log::info!("QML cancel_console_login");
+        self.push_command(Cmd::ConsoleLoginCancel.to_value());
+    }),
     /// QML: answer a permission request (`response`: once | always | reject).
     answer_permission: qt_method!(fn answer_permission(&self, session: QString, id: QString, response: QString) {
         let session = session.to_string();
@@ -502,6 +542,11 @@ impl AppBridge {
     /// Diagnostic GUI-mark handle for the dumper thread in main().
     pub fn gui_mark_handle(&self) -> Arc<Mutex<GuiMark>> {
         self.gui_mark_shared.clone()
+    }
+
+    /// Device-login handle for the worker (start/cancel/read status).
+    pub fn console_login_handle(&self) -> crate::auth::ConsoleLogin {
+        self.console_login.clone()
     }
 
     /// Push a JSON command onto the queue for the worker.
