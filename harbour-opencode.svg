@@ -1,19 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="86" height="86" viewBox="0 0 86 86">
   <defs>
-    <radialGradient id="bg" cx="43.2205" cy="43.2221" r="42.7984" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#24324d"/>
-      <stop offset="0.6" stop-color="#16203a"/>
-      <stop offset="1" stop-color="#0e1424"/>
-    </radialGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="86" y2="86" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a3e635"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
   </defs>
-
-  <path d="M1.723,0.4H43c23.583,0,42.7,19.066,42.7,42.595V84.18c0,0.784-0.637,1.42-1.423,1.42H43c-23.583,0-42.7-19.076-42.7-42.606V1.82C0.3,1.035,0.937,0.4,1.723,0.4z" fill="url(#bg)"/>
-
-  <g fill="none" stroke="#33e0c6" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
-    <polyline points="36,28.5 23,42 36,55.5"/>
-    <polyline points="48,28.5 61,42 48,55.5"/>
-    <line x1="45.5" y1="26.5" x2="38.5" y2="57.5"/>
+  <path d="M84.277,0.4H43c-23.583,0,-42.7,19.066,-42.7,42.595V84.18c0,0.784,0.637,1.42,1.423,1.42H43c23.583,0,42.7,-19.076,42.7,-42.606V1.82c0,-0.785,-0.637,-1.42,-1.423,-1.42z" fill="url(#bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="25,28 39,42 25,56"/>
   </g>
-
-  <rect x="65.5" y="36" width="6.5" height="6.5" rx="1.6" fill="#ffd166"/>
+  <rect x="45.5" y="51.5" width="16" height="6.5" rx="2.2" fill="#ffffff"/>
 </svg>
