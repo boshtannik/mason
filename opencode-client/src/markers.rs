@@ -3,7 +3,7 @@
 //!
 //! Mirrored on the QML side in `harbour-opencode.qml` (readonly constants
 //! `kTsOpen`, `kTsClose`, `kThinkTag`, `kUserPrefix`, `kSvcOpen`, `kErrOpen`,
-//! `kTagClose`, `kErrTag`, `kSttTag`, `kTtsTag`, `kSttDoneTag`, `kArgSep`,
+//! `kTagClose`, `kErrTag`, `kSttTag`, `kTtsTag`, `kTtsStopTag`, `kSttDoneTag`, `kArgSep`,
 //! plus helpers `stripTs` and `lineIs`). Keep both files in sync: only change
 //! a marker here and in the QML mirror.
 
@@ -31,6 +31,10 @@ pub const USER_PREFIX: &str = ">>> ";
 pub const STT_TAG: &str = "[[stt]]";
 /// Finished TTS-WAV label (worker sends `[[tts]]<path>`).
 pub const TTS_TAG: &str = "[[tts]]";
+/// Control: stop playback and drop the whole speech queue (worker emits when the
+/// user starts dictating or presses a stop button; QML silences its player and
+/// does not report the stop back as a finished playback).
+pub const TTS_STOP_TAG: &str = "[[ttsstop]]";
 /// Control: STT cycle finished (worker emits; QML stops the mic loader).
 pub const STT_DONE_TAG: &str = "[[sttdone]]";
 

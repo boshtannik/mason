@@ -19,6 +19,8 @@ thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
 
+voice-engine = { path = "../voice-engine" }
+
 qmetaobject = { path = "vendor/qmetaobject-sfos-rs/qmetaobject" }
 sailors = { path = "vendor/sailors" }
 

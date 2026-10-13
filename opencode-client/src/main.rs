@@ -1022,6 +1022,7 @@ reasonings.clear();
                         | Cmd::VoiceTts { .. }
                         | Cmd::VoiceTtsMode { .. }
                         | Cmd::VoiceTtsCancel
+                        | Cmd::VoiceTtsPlayed { .. }
                         | Cmd::VoiceCatalogUpdate => {
                             voice::run_command(&voice, &command, &worker_pending).await;
                         }

@@ -122,6 +122,12 @@ pub enum Cmd {
         id: String,
     },
     VoiceTtsCancel,
+    /// Playback ack: QML reports that the WAV at `id` (its path) stopped
+    /// playing, so the worker can release the next queued item. This is what
+    /// makes Rust the single arbiter of the speech queue.
+    VoiceTtsPlayed {
+        id: String,
+    },
     VoiceCatalogUpdate,
 }
 
@@ -146,6 +152,7 @@ impl Cmd {
                 | Cmd::VoiceTts { .. }
                 | Cmd::VoiceTtsMode { .. }
                 | Cmd::VoiceTtsCancel
+                | Cmd::VoiceTtsPlayed { .. }
                 | Cmd::VoiceCatalogUpdate
         )
     }

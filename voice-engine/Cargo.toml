@@ -1,0 +1,9 @@
+[package]
+name = "voice-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Pure TTS arbitration engine for harbour-opencode (no Qt, no I/O) — unit-testable on the host"
+
+[lib]
+name = "voice_engine"
+path = "src/lib.rs"

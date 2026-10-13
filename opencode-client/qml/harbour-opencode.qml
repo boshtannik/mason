@@ -95,6 +95,7 @@ ApplicationWindow {
     readonly property string kUserPrefix: ">>> "
     readonly property string kSttTag: "[[stt]]"
     readonly property string kTtsTag: "[[tts]]"
+    readonly property string kTtsStopTag: "[[ttsstop]]"
     readonly property string kSttDoneTag: "[[sttdone]]"
     // i18n tokens (worker sends a translation KEY; QML resolves qsTr): see
     // opencode-client/src/i18n.rs. `[[s:KEY]]` — service notice,
@@ -201,6 +202,10 @@ ApplicationWindow {
     // Whether speech synthesis is in progress: the command was sent to the
     // worker, the WAV is not in the queue yet (the quietest phase, where feedback matters).
     property bool ttsSynth: false
+    // Path of the WAV currently loaded in ttsPlayer. The worker owns the queue
+    // and sends one file at a time; when playback stops we ack this path back
+    // (voice_tts_played) so the worker releases the next item.
+    property string ttsCurrentPath: ""
 
     // Protocol constants of the voice module.
     // The commands mirror `voice::cmd` in src/voice.rs, the engines — `voice::engine`,
@@ -218,6 +223,7 @@ ApplicationWindow {
     readonly property string cmdTts: "voice_tts"
     readonly property string cmdTtsMode: "voice_tts_mode"
     readonly property string cmdTtsCancel: "voice_tts_cancel"
+    readonly property string cmdTtsPlayed: "voice_tts_played"
     readonly property string cmdCatalogUpdate: "voice_catalog_update"
     readonly property string engineStt: "stt_whisper"
     readonly property string engineTts: "tts_piper"
@@ -351,67 +357,61 @@ ApplicationWindow {
         onTriggered: app.poll()
     }
 
-    // TTS queue: WAV files are synthesised by the worker asynchronously
-    // (several messages in a row = several files). We play strictly in
-    // order of arrival: mediaplayer finished → take the next from the queue.
-    // Each item is `{path, body}`: body is the exact text of the bubble that
-    // owns the file (the worker sends it after `kArgSep`), so the "stop/speak"
-    // button follows the message actually playing (see speakingBubble).
-    property var ttsQueue: []
-
+    // TTS player. The worker (Rust) is the single source of truth for the
+    // speech queue, for the "is the user dictating" decision and for
+    // cancellation; QML only plays the one file it is told to play and reports
+    // back when it stopped. This removes the QML↔Rust race between the two
+    // state machines (a cancelled part could otherwise "ripen" and start
+    // playing after the user already stopped it).
     MediaPlayer {
         id: ttsPlayer
         onPlaybackStateChanged: {
-            if (ttsPlayer.playbackState === MediaPlayer.StoppedState)
-                app.playNextTts()
-        }
-    }
-    function playNextTts() {
-        // Never speak over the user's dictation: while the mic records or the
-        // recognizer runs, defer (the queue stays; the handlers below wake it
-        // when the dictation ends).
-        if (app.recording || app.recognizing)
-            return
-        if (app.ttsQueue.length === 0) {
+            if (ttsPlayer.playbackState !== MediaPlayer.StoppedState)
+                return
+            // Only report a stop we did NOT initiate ourselves. Assigning a new
+            // `source` also resets the state to Stopped while `ttsPlaying` is
+            // still false, so that transient must not be acked.
+            var donePath = app.ttsPlaying ? app.ttsCurrentPath : ""
+            app.ttsCurrentPath = ""
             app.ttsPlaying = false
             app.ttsSynth = false
             app.speakingBubble = ""
-            return
+            if (donePath !== "")
+                app.voiceCmd(app.cmdTtsPlayed, donePath)
         }
-        var item = app.ttsQueue.shift()
-        ttsPlayer.source = "file://" + item.path
-        // The TTS indicator moves with the queue: the "stop" button turns on
-        // for the bubble whose sound is actually playing right now.
-        app.speakingBubble = item.body
+    }
+    // Play the single file the worker handed us. The worker already decided
+    // this is allowed now (not dictating, nothing else playing).
+    function playTts(path, body) {
+        if (path === "" || path === undefined)
+            return
+        // Assign the source first (it may reset the player to StoppedState);
+        // only then mark the file active and start playback, so the state
+        // handler above never acks a half-set file.
+        ttsPlayer.source = "file://" + path
+        app.ttsCurrentPath = path
+        // The worker echoes the exact bubble text it synthesised, so the
+        // "stop/speak" button follows the bubble actually sounding.
+        app.speakingBubble = (body === "" || body === undefined) ? "" : body
         app.ttsPlaying = true
         app.ttsSynth = false
         ttsPlayer.play()
     }
-    // Dictation finished (recording released, recognition done) → wake the
-    // speech that playNextTts deferred while the mic was busy.
-    onRecordingChanged: if (!recording && !recognizing) app.playNextTts()
-    onRecognizingChanged: if (!recording && !recognizing) app.playNextTts()
-    function ttsEnqueue(path, body) {
-        if (path === "" || path === undefined)
-            return
-        // Which bubble the file belongs to is decided by the worker (it knows
-        // the exact answer text it synthesised) and travels with the path after
-        // `kArgSep`. Fall back to the text we sent for synthesis if absent.
-        if (body === "" || body === undefined)
-            body = app.speakingBubble
-        app.ttsQueue.push({ path: path, body: body })
-        if (!app.ttsPlaying)
-            app.playNextTts()
-    }
-    function stopTts() {
-        app.ttsQueue = []
+    // Silence the local player without telling the worker (used when the
+    // worker itself ordered the stop, or because a stop command is already on
+    // its way — no point reporting a finished playback it will ignore anyway).
+    function stopTtsPlayer() {
+        app.ttsCurrentPath = ""
         app.ttsPlaying = false
         app.ttsSynth = false
         app.speakingBubble = ""
-        // Ask the worker not to hand over the WAV if piper is still synthesising,
-        // otherwise the file "ripens" and playback switches on again.
-        app.voiceCmd(app.cmdTtsCancel, "")
         ttsPlayer.stop()
+    }
+    // User stop (bubble button / cover): silence now and ask the worker to drop
+    // its whole queue and invalidate any synthesis still running.
+    function stopTts() {
+        app.voiceCmd(app.cmdTtsCancel, "")
+        app.stopTtsPlayer()
     }
     function speakText(text) {
         app.speakingBubble = text
@@ -499,6 +499,15 @@ ApplicationWindow {
                         continue
                     }
 
+                    // Control line: the worker stopped the speech (the user
+                    // pressed a stop button or started dictating). Silence the
+                    // player; the worker already dropped its queue, so we must
+                    // NOT report this stop back as a finished playback.
+                    if (app.lineIs(bodyTmp, app.kTtsStopTag)) {
+                        app.stopTtsPlayer()
+                        continue
+                    }
+
                     // Live model reasoning ([[thinklive]]): the worker streams
                     // deltas of `type:"reasoning"` parts while the model thinks.
                     // Replace the trailing [[think]] bubble in place (or start a
@@ -583,17 +592,16 @@ ApplicationWindow {
                         continue
                     }
 
-                    // TTS synthesis done: put the file into the queue, do not add it to the feed.
+                    // TTS synthesis done: play the file the worker handed us.
                     // Format: `[[tts]]<path>\u001f<body>` — the body is the exact
                     // answer text the file belongs to (bound to its bubble).
                     if (app.lineIs(line, app.kTtsTag)) {
-                        app.recognizing = false
                         var ttsRest = line.substring(app.kTtsTag.length).replace(/^\s+/, "")
                         var ttsSep = ttsRest.indexOf(app.kArgSep)
                         var ttsPath = ttsSep >= 0 ? ttsRest.substring(0, ttsSep) : ttsRest
                         var ttsBody = ttsSep >= 0 ? ttsRest.substring(ttsSep + 1) : ""
                         if (ttsPath !== "")
-                            app.ttsEnqueue(ttsPath, ttsBody)
+                            app.playTts(ttsPath, ttsBody)
                         continue
                     }
 
@@ -815,10 +823,11 @@ ApplicationWindow {
     }
     function startPttHold() {
         if (!app.recording) {
-            // The mic and the speaker must never fight: silence any ongoing
-            // speech first (stops playback, drops queued and still-synthesising
-            // WAVs) — the dictation takes priority.
-            app.stopTts()
+            // The mic and the speaker must never fight: silence playback now
+            // (locally, for instant feedback) and let the worker drop its own
+            // queue — VoiceRecordStart makes Rust stop all speech and
+            // invalidate anything still synthesising.
+            app.stopTtsPlayer()
             app.recognizing = false
             app.recording = true
             app.voiceCmd(app.cmdRecordStart, "")
@@ -827,9 +836,9 @@ ApplicationWindow {
     function stopPttHold() {
         dictationTimer.stop()
         if (app.recording) {
-            // recognizing FIRST, then recording=false: the resume handlers
-            // above only wake playback when BOTH are off, so speech cannot
-            // start in the gap before recognition begins.
+            // recognizing FIRST, then recording=false: the worker only resumes
+            // speech after recognition finishes, so playback cannot start in
+            // the gap before STT begins.
             app.recognizing = true
             app.recording = false
             app.voiceCmd(app.cmdRecordStop, "")

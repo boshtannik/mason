@@ -6,11 +6,18 @@ use crate::cmd::Cmd;
 use crate::i18n::{now_ms, svc_line};
 use crate::markers::*;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Speech arbitration state machine (queue, dictation gating, generation-based
+/// cancellation). Lives in the dependency-free `voice-engine` crate so it can be
+/// unit-tested on the host; QML is only a dumb player that executes what Rust
+/// tells it and acks finished playback.
+pub use voice_engine::TtsMode;
+use voice_engine::{cache_file_name, strip_markdown_for_tts, Pump, SynthStep, TtsEngine};
 
 pub const CATALOG_PATH: &str = "/usr/share/harbour-opencode/models.json";
 /// The fresh model catalog is downloaded from the official dsnote (mkiol) repo —
@@ -44,12 +51,7 @@ fn tts_cache_dir() -> PathBuf {
 
 /// Stable cache path for a (model, spoken text) pair.
 fn tts_cache_path(model: &str, spoken: &str) -> PathBuf {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    model.hash(&mut h);
-    0u8.hash(&mut h);
-    spoken.hash(&mut h);
-    tts_cache_dir().join(format!("{:016x}.wav", h.finish()))
+    tts_cache_dir().join(cache_file_name(model, spoken))
 }
 
 /// Upper bounds for the persistent TTS cache: at most this many WAV files and
@@ -119,43 +121,10 @@ pub fn cleanup_tmp() {
     enforce_cache_limit();
 }
 
-/// Answer playback mode: [Auto] — speak every answer, [Button] — only
-/// via the 🔉 button on the bubble, [Off] — off. Single source of protocol strings.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TtsMode {
-    Auto,
-    Button,
-    Off,
-}
-
-impl Default for TtsMode {
-    fn default() -> Self {
-        TtsMode::Button
-    }
-}
-
-impl TtsMode {
-    pub const ALL: [TtsMode; 3] = [TtsMode::Auto, TtsMode::Button, TtsMode::Off];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            TtsMode::Auto => "auto",
-            TtsMode::Button => "button",
-            TtsMode::Off => "off",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<TtsMode> {
-        match s {
-            "auto" => Some(TtsMode::Auto),
-            "button" => Some(TtsMode::Button),
-            "off" => Some(TtsMode::Off),
-            _ => None,
-        }
-    }
-}
-
-/// Voice command names — single source of truth: `crate::cmd::Cmd` (voice variants).
+/// Answer playback mode, the TTS queue/arbitration state machine and its
+/// generation-based cancellation now live in the `voice-engine` crate (re-
+/// exported through `pub use voice_engine::TtsMode` above); see
+/// `voice-engine/src/lib.rs`.
 
 /// Model engines (keys of the models.json catalog).
 pub mod engine {
@@ -209,26 +178,14 @@ pub struct VoiceState {
     pub tts_mode: Arc<std::sync::Mutex<TtsMode>>,
     /// Models whose download should be cancelled (set by a command, checked in download_model).
     pub cancel_dl: Arc<std::sync::Mutex<HashSet<String>>>,
-    /// Cancel the current synthesis: set to true so run_tts won't push the WAV
-    /// into the queue and will delete the file (set by QML stop, checked in run_tts).
-    pub cancel_tts: Arc<std::sync::Mutex<bool>>,
     /// Whether a transcription task is running right now. TTS defers while STT runs,
     /// so the two engines don't saturate the CPU at the same time.
     pub stt_busy: Arc<std::sync::Mutex<bool>>,
-    /// FIFO of texts waiting for synthesis plus the single-pump flag. Synthesis
-    /// must keep the order in which the parts arrived: the parts of one answer
-    /// are queued as they finish and playback has to follow the text order
-    /// (parallel per-part tasks used to race on a busy flag and a late part
-    /// could play after the last one).
-    pub tts_pipeline: Arc<std::sync::Mutex<TtsPipeline>>,
-}
-
-/// FIFO state of the synthesis pipeline (see [VoiceState::tts_pipeline]).
-#[derive(Default)]
-pub struct TtsPipeline {
-    pub queue: VecDeque<String>,
-    /// True while the pump task lives: queued texts will be processed.
-    pub running: bool,
+    /// Single speech arbiter: synthesis FIFO, playback FIFO, dictation gating
+    /// and generation-based cancellation (see `voice-engine`). Rust owns this
+    /// state; QML only plays what Rust sends and acks finished playback, so the
+    /// two sides can no longer disagree about "is the user dictating?".
+    pub tts: Arc<std::sync::Mutex<TtsEngine>>,
 }
 
 impl VoiceState {
@@ -773,6 +730,9 @@ pub async fn run_stt(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec
     if let Ok(mut b) = voice.stt_busy.lock() {
         *b = false;
     }
+    // Dictation is over: speech that was queued (or synthesised) while the user
+    // talked may start now — the engine deferred playback until this moment.
+    flush_playback(voice, pending);
 }
 
 async fn run_stt_impl(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
@@ -1013,110 +973,20 @@ fn piper_files(model: &Value) -> Option<(PathBuf, PathBuf)> {
     (onnx.exists() && json.exists()).then_some((onnx, json))
 }
 
-/// Strip markdown formatting before synthesis: headings, lists, block quotes,
-/// code fences, inline links and the markup symbols (** ~ # | >) — so the
-/// speech engine gets clean prose instead of reading the markup characters.
-fn strip_markdown_for_tts(md: &str) -> String {
-    let mut out = String::new();
-    let mut in_fence = false;
-    for line in md.lines() {
-        let t = line.trim();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
-            continue;
-        }
-        if in_fence || t.is_empty() {
-            continue;
-        }
-        // Horizontal rules.
-        if t.chars().all(|c| "-*_~".contains(c)) && t.chars().count() >= 3 {
-            continue;
-        }
-        // Headings, block quotes and table separators: drop the leading marker.
-        let rest = t
-            .trim_start_matches(|c| c == '#' || c == '>' || c == '|')
-            .trim_start();
-        // Bullet lists: "- x", "* x", "+ x".
-        let rest = rest
-            .strip_prefix('-')
-            .or_else(|| rest.strip_prefix('*'))
-            .or_else(|| rest.strip_prefix('+'))
-            .map(|s| s.trim_start())
-            .unwrap_or(rest);
-        // Numbered lists: "1. x", "12. x".
-        let rest = {
-            let bytes = rest.as_bytes();
-            let mut i = 0;
-            while i < bytes.len() && bytes[i].is_ascii_digit() {
-                i += 1;
-            }
-            if i > 0 && i < bytes.len() && bytes[i] == b'.' {
-                rest[i + 1..].trim_start()
-            } else {
-                rest
-            }
-        };
-        let cleaned = clean_inline_tts(rest);
-        if !cleaned.is_empty() {
-            out.push_str(&cleaned);
-            out.push(' ');
-        }
-    }
-    out
-}
-
-/// Inline pass: keep the link label and drop backticks plus the markup symbols.
-/// Everything is read character by character, so no regex crate is needed.
-fn clean_inline_tts(raw: &str) -> String {
-    let mut src = raw;
-    let mut out = String::with_capacity(raw.len());
-    while !src.is_empty() {
-        if let Some(i) = src.find('[') {
-            out.push_str(&drop_markup(&src[..i]));
-            match src[i..].find(']') {
-                Some(j) => {
-                    let label = &src[i + 1..i + j];
-                    let after = &src[i + j + 1..];
-                    // "[label](url)" → label; a lone "[" → label without adornment.
-                    if let Some(after) = after.strip_prefix("(") {
-                        match after.find(')') {
-                            Some(k) => {
-                                out.push_str(&clean_inline_tts(label));
-                                out.push(' ');
-                                src = &after[k + 1..];
-                                continue;
-                            }
-                            None => {}
-                        }
-                    }
-                    out.push_str(&clean_inline_tts(label));
-                    out.push(' ');
-                    src = after;
-                }
-                None => {
-                    out.push_str(&drop_markup(&src[i..]));
-                    break;
-                }
-            }
-        } else {
-            out.push_str(&drop_markup(src));
-            break;
-        }
-    }
-    out.split_whitespace().collect::<Vec<&str>>().join(" ")
-}
-
-/// Remove the characters that mark bold/italic/strike/code/inline table cells.
-fn drop_markup(s: &str) -> String {
-    s.chars().filter(|c| !"`*_~|#>".contains(*c)).collect()
-}
-
-/// Synthesize the text with the selected TTS model into a WAV and ask QML to play it.
+/// Synthesize one text part with the selected TTS model into a cached WAV and,
+/// if its generation is still current, hand it to the playback queue.
 ///
-/// The worker doesn't touch the audio device: piper writes `/tmp/harbour-opencode-tts.wav`,
-/// the worker pushes a `[[tts]]<path>` line, QML plays it via MediaPlayer.
-/// This way no cpal/PulseAudio is needed in the Rust process, and the playback itself doesn't block the SSE stream.
-pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
+/// The worker doesn't touch the audio device: piper writes a WAV, the worker
+/// pushes a `[[tts]]<path>\u001f<body>` line, QML plays it via MediaPlayer and
+/// acks with `voice_tts_played`. `gen` is the generation captured when the item
+/// left the synthesis FIFO; if a stop happened meanwhile the result is not
+/// queued (so a cancelled answer can never "resurrect").
+async fn run_tts_one(
+    voice: &Arc<VoiceState>,
+    text: &str,
+    gen: u64,
+    pending: &Arc<std::sync::Mutex<Vec<String>>>,
+) {
     let id = voice.tts_model.lock().map(|g| g.clone()).unwrap_or_default();
     if id.is_empty() {
         if let Ok(mut q) = pending.lock() {
@@ -1161,9 +1031,7 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     // model — replay the file instead of running piper again.
     if final_wav.exists() {
         log::info!("TTS: из кэша {}", final_wav.display());
-        if let Ok(mut q) = pending.lock() {
-            q.push(format!("{TTS_TAG}{}{ARG_SEP}{body}", final_wav.display()));
-        }
+        finish_tts(voice, gen, &final_wav, body);
         return;
     }
     // Unique temp file in the cache dir; renamed into place on success, so a
@@ -1227,15 +1095,10 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
         }
         return;
     }
-    // Synthesis finished, but the user may have managed to press "stop" — then
-    // we don't enqueue the result and clean up the file (if it got written).
-    if voice.cancel_tts.lock().map(|g| *g).unwrap_or(false) {
-        log::info!("TTS: синтез отменён пользователем, файл не отдаю");
-        let _ = std::fs::remove_file(&out_wav);
-        return;
-    }
     // Move the finished WAV into the cache under its content hash, so a repeat
     // request for the same answer is served from the cache (no re-synthesis).
+    // The move happens BEFORE the generation check, so a queued path always
+    // points at a real file; a stale result simply stays unused in the cache.
     if let Err(e) = std::fs::rename(&out_wav, &final_wav) {
         log::warn!("TTS: не переместить в кэш: {e}");
         let _ = std::fs::remove_file(&out_wav);
@@ -1244,39 +1107,34 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     // Trim the cache if it outgrew its caps (LRU: the file we just wrote is
     // the newest, so it is never the one evicted).
     enforce_cache_limit();
+    // A stop may have happened while piper ran: finish_synth compares the
+    // generation and refuses to queue a cancelled answer.
+    if !finish_tts(voice, gen, &final_wav, body) {
+        log::info!("TTS: синтез устарел (стоп) — в очередь не отдаю");
+        return;
+    }
     log::info!("TTS: синтез готов → {}", final_wav.display());
-    if let Ok(mut q) = pending.lock() {
-        q.push(format!("{TTS_TAG}{}{ARG_SEP}{body}", final_wav.display()));
+}
+
+/// Hand a synthesised file to the playback queue if generation `gen` is still
+/// current. Returns `false` when a stop invalidated it in the meantime.
+fn finish_tts(voice: &Arc<VoiceState>, gen: u64, path: &Path, body: String) -> bool {
+    match voice.tts.lock() {
+        Ok(mut e) => e.finish_synth(gen, path.display().to_string(), body),
+        Err(_) => false,
     }
 }
 
 /// TTS entry point (auto mode per answer part, or the speak button): append the
 /// text to the strict FIFO and start the single pump task if it is not running.
-/// The pump synthesises the queue one item at a time, in arrival order — the
-/// old spawn-per-part design raced on a busy flag and unrelated parts could be
-/// synthesised out of order (a late part jumped in after the last one).
+/// The pump synthesises the queue one item at a time, in arrival order; the
+/// engine decides when playback may actually start (dictation gating).
 pub async fn tts_from_call(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
-    let text = text.trim_end().to_string();
-    if text.trim().is_empty() {
-        return;
-    }
-    // New synthesis = clear the cancel request left by the previous stop.
-    if let Ok(mut c) = voice.cancel_tts.lock() {
-        *c = false;
-    }
-    let spawn = match voice.tts_pipeline.lock() {
-        Ok(mut p) => {
-            p.queue.push_back(text);
-            if p.running {
-                false
-            } else {
-                p.running = true;
-                true
-            }
-        }
+    let pump = match voice.tts.lock() {
+        Ok(mut e) => e.enqueue(text),
         Err(_) => return,
     };
-    if spawn {
+    if let Some(Pump::Start) = pump {
         let voice2 = voice.clone();
         let pending2 = pending.clone();
         tokio::spawn(async move {
@@ -1285,47 +1143,63 @@ pub async fn tts_from_call(voice: &Arc<VoiceState>, text: &str, pending: &Arc<st
     }
 }
 
-/// Single synthesis runner: drains [VoiceState::tts_pipeline] strictly in order.
+/// Single synthesis runner: drains the [TtsEngine] FIFO strictly in order.
 /// Waits while the user dictates (microphone/recognition running) so TTS never
-/// overlaps their speech. A stop request empties the queue and releases the
-/// pump, so nothing queued can start after the user pressed stop.
+/// overlaps their speech; a stop bumps the generation, empties both queues and
+/// makes `next_synth` report `Done`.
 async fn run_tts_pump(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
     loop {
-        while voice.dictating() {
-            if voice.cancel_tts.lock().map(|c| *c).unwrap_or(false) {
-                stop_pump(voice, true);
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(120)).await;
-        }
-        if voice.cancel_tts.lock().map(|c| *c).unwrap_or(false) {
-            stop_pump(voice, true);
-            return;
-        }
-        let next = match voice.tts_pipeline.lock() {
-            Ok(mut p) => p.queue.pop_front(),
+        // Compute `dictating` BEFORE locking the engine: `dictating()` takes
+        // the rec/stt_busy locks and must never nest inside the tts lock.
+        let dictating = voice.dictating();
+        let step = match voice.tts.lock() {
+            Ok(mut e) => e.next_synth(dictating),
             Err(_) => return,
         };
-        match next {
-            Some(text) => run_tts(voice, &text, pending).await,
-            None => {
-                stop_pump(voice, false);
+        match step {
+            SynthStep::Work(text, gen) => run_tts_one(voice, &text, gen, pending).await,
+            SynthStep::Wait => tokio::time::sleep(Duration::from_millis(120)).await,
+            SynthStep::Done => {
+                // Nothing left to synthesise: release whatever is already ready
+                // (unless the user dictates — then it stays queued and
+                // `flush_playback` after dictation resumes it).
+                flush_playback(voice, pending);
                 return;
             }
         }
     }
 }
 
-/// Release the pump; on cancel also drop everything still queued (nothing else
-/// may start after the user pressed stop).
-fn stop_pump(voice: &VoiceState, cancelled: bool) {
-    if let Ok(mut p) = voice.tts_pipeline.lock() {
-        if cancelled && !p.queue.is_empty() {
-            log::info!("TTS: cancel — dropping {} queued item(s)", p.queue.len());
-            p.queue.clear();
-        }
-        p.running = false;
+/// Emit the next `[[tts]]` line if playback is allowed right now: not while the
+/// user dictates, and only one file at a time. QML acks the finished file via
+/// `voice_tts_played`, which calls this again for the next item.
+fn flush_playback(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
+    if voice.dictating() {
+        return;
     }
+    let item = match voice.tts.lock() {
+        Ok(mut e) => e.next_play(false),
+        Err(_) => return,
+    };
+    if let Some(ready) = item {
+        if let Ok(mut q) = pending.lock() {
+            q.push(format!("{TTS_TAG}{}{ARG_SEP}{}", ready.path, ready.body));
+        }
+    }
+}
+
+/// Stop all speech and invalidate anything already in flight: clear the
+/// synthesis and playback queues, release the current player (generation bump
+/// discards a synthesis that is mid-piper) and tell QML to silence its
+/// MediaPlayer. Called when the user starts dictating or presses a stop button.
+fn stop_tts(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
+    if let Ok(mut e) = voice.tts.lock() {
+        e.stop();
+    }
+    if let Ok(mut q) = pending.lock() {
+        q.push(TTS_STOP_TAG.to_string());
+    }
+    log::info!("TTS: остановка — очередь очищена");
 }
 
 /// Handle voice module commands (from the QML queue).
@@ -1439,7 +1313,12 @@ pub async fn run_command(
             voice.persist();
             voice.refresh_status();
         }
-        Cmd::VoiceRecordStart => start_recording(voice).await,
+        Cmd::VoiceRecordStart => {
+            // The mic takes priority over the speaker: silence playback and
+            // drop anything queued/synthesising before opening the microphone.
+            stop_tts(voice, pending);
+            start_recording(voice).await;
+        }
         Cmd::VoiceRecordStop => {
             stop_recording(voice).await;
             // Confirm the end of listening with a short status message.
@@ -1466,12 +1345,24 @@ pub async fn run_command(
             }
         }
         Cmd::VoiceTtsCancel => {
-            // Cancel the current synthesis/playback queue: run_tts checks the flag
-            // after piper finishes and won't enqueue the WAV.
-            if let Ok(mut c) = voice.cancel_tts.lock() {
-                *c = true;
+            // A stop button (bubble / cover): drop the whole speech queue and
+            // invalidate a synthesis that is still running.
+            stop_tts(voice, pending);
+        }
+        Cmd::VoiceTtsPlayed { id } => {
+            // QML finished playing the WAV at `id`: release the next queued
+            // item. A stale ack (a file that already stopped, e.g. due to a
+            // stop) is ignored.
+            let done = voice
+                .tts
+                .lock()
+                .map(|mut e| e.playback_finished(id))
+                .unwrap_or(false);
+            if done {
+                flush_playback(voice, pending);
+            } else {
+                log::debug!("TTS: ack для неактивного файла игнорирую: {id}");
             }
-            log::info!("TTS: отмена озвучки запрошена");
         }
         Cmd::VoiceCatalogUpdate => {
             // Refresh the model catalog from GitHub; report the result as a

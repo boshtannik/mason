@@ -46,6 +46,7 @@ docker run --rm \
   cd /src
   tar -cf - \
     --exclude=./opencode-client/target \
+    --exclude=./voice-engine/target \
     --exclude=./.git \
     --exclude=./spike \
     --exclude=./sfos-sysroot \
