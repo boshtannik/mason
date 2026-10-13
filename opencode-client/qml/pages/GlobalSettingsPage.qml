@@ -203,6 +203,7 @@ Item {
 
             Button {
                 visible: globalSettingsPage.login.state !== "waiting"
+                anchors.horizontalCenter: parent.horizontalCenter
                 text: qsTr("Sign in with OpenCode")
                 onClicked: globalSettingsPage.appWindow.startConsoleLogin()
             }
@@ -229,6 +230,7 @@ Item {
             Button {
                 visible: globalSettingsPage.login.state === "waiting"
                         && globalSettingsPage.login.url !== ""
+                anchors.horizontalCenter: parent.horizontalCenter
                 text: qsTr("Open browser again")
                 onClicked: Qt.openUrlExternally(globalSettingsPage.login.url)
             }
@@ -251,6 +253,7 @@ Item {
 
             Button {
                 visible: globalSettingsPage.login.state === "waiting"
+                anchors.horizontalCenter: parent.horizontalCenter
                 text: qsTr("Cancel")
                 onClicked: globalSettingsPage.appWindow.cancelConsoleLogin()
             }
@@ -268,51 +271,6 @@ Item {
                 color: globalSettingsPage.login.state === "success"
                        ? Theme.highlightColor : Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            Label {
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                text: qsTr("Or paste a service-account API key:")
-                wrapMode: Text.Wrap
-                color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            TextField {
-                id: apiKeyField
-                width: parent.width
-                echoMode: TextInput.Password
-                placeholderText: qsTr("API key")
-                label: qsTr("OpenCode API key")
-                EnterKey.enabled: text.length > 0
-                EnterKey.iconSource: "image://theme/icon-m-enter-accept"
-                EnterKey.onClicked: {
-                    globalSettingsPage.saveProviderKey()
-                    focus = false
-                }
-            }
-
-            Button {
-                text: qsTr("Save key")
-                enabled: apiKeyField.text.length > 0
-                onClicked: globalSettingsPage.saveProviderKey()
-            }
-
-            Label {
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                text: globalSettingsPage.providerKeySet
-                      ? qsTr("Key is set ✓") : qsTr("No key saved")
-                color: globalSettingsPage.providerKeySet
-                       ? Theme.highlightColor : Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            Timer {
-                id: keyRefreshTimer
-                interval: 1500
-                onTriggered: globalSettingsPage.refreshProviderKey()
             }
 
             SectionHeader { text: qsTr("General") }
