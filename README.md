@@ -14,12 +14,12 @@ Built and tested on a Sony Xperia 10 IV running Sailfish OS 5.1.0.11 (aarch64).
 
 <table>
   <tr>
-    <td align="center"><img src="screenshots/photo_1_2026-10-10_03-53-37.jpg" width="240" alt="mason screenshot 1"></td>
-    <td align="center"><img src="screenshots/photo_2_2026-10-10_03-53-37.jpg" width="240" alt="mason screenshot 2"></td>
+    <td align="center"><img src="screenshots/photo_1_2026-10-13_04-15-38.jpg" width="240" alt="mason screenshot 1"></td>
+    <td align="center"><img src="screenshots/photo_2_2026-10-13_04-15-38.jpg" width="240" alt="mason screenshot 2"></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/photo_3_2026-10-10_03-53-37.jpg" width="240" alt="mason screenshot 3"></td>
-    <td align="center"><img src="screenshots/photo_4_2026-10-10_03-53-37.jpg" width="240" alt="mason screenshot 4"></td>
+    <td align="center"><img src="screenshots/photo_3_2026-10-13_04-15-38.jpg" width="240" alt="mason screenshot 3"></td>
+    <td align="center"><img src="screenshots/photo_4_2026-10-13_04-15-38.jpg" width="240" alt="mason screenshot 4"></td>
   </tr>
 </table>
 
@@ -122,7 +122,7 @@ sg docker -c "./mbuild.sh"            # debug — fast, for development
 sg docker -c "./mbuild.sh --release"  # release — optimized
 ```
 
-Output: `harbour-opencode-0.1-1.aarch64.rpm`.
+Output: `harbour-opencode-0.1.0-1.aarch64.rpm`.
 
 Alternative non-Docker build via `mb2`: `scripts/build.sh`.
 
@@ -139,7 +139,7 @@ Env vars (no credentials are hardcoded in the repo):
 - `SFOS_USER` — ssh user (default `defaultuser`)
 - `SFOS_PASS` — ssh password
 
-Install the RPM on the device: `devel-su rpm -Uvh --force harbour-opencode-0.1-1.aarch64.rpm`.
+Install the RPM on the device: `devel-su rpm -Uvh --force harbour-opencode-0.1.0-1.aarch64.rpm`.
 
 Dev-only scripts (`restart-probe.sh`, `opencode-client/qml/do-probe.sh`,
 `scripts/tts-restart.sh`, …) reuse `devel-su` and read the password from

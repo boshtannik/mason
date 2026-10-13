@@ -14,6 +14,9 @@ target/
 *.rpm
 .resolve.out
 
+# Internal publishing kit (contains a security note) — not for the public repo
+/OPENREPOS.md
+
 # Тяжёлые/экспериментальные каталоги (не тащим в git)
 /vendor/
 /sfos-sysroot/
