@@ -10,6 +10,9 @@ and approve tool calls, stream assistant output, and use local voice input/outpu
 
 Built and tested on a Sony Xperia 10 IV running Sailfish OS 5.1.0.11 (aarch64).
 
+> **Compatibility (for now):** aarch64 devices only, built for **Sailfish OS 5.1**.
+> Other architectures are not built yet.
+
 ## Screenshots
 
 <table>
