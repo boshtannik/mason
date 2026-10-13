@@ -93,7 +93,11 @@ echo "OC-SRC md5: $(md5sum /home/mersdk/cargo-cache/opencode-cli/opencode)"
 install -Dm 755 /home/mersdk/cargo-cache/opencode-cli/opencode %{buildroot}%{_libexecdir}/%{name}/opencode
 echo "OC-DST md5: $(md5sum %{buildroot}%{_libexecdir}/%{name}/opencode)"
 install -Dm 644 opencode-client/assets/models.json -t %{buildroot}%{_datadir}/%{name}
-install -Dm 644 harbour-opencode.png -t %{buildroot}%{_datadir}/icons/hicolor/86x86/apps
+# Launcher icons in all recommended sizes (Sailfish icon guidelines).
+for size in 86x86 108x108 128x128 172x172; do
+  install -Dm 644 icons/$size/harbour-opencode.png \
+    %{buildroot}%{_datadir}/icons/hicolor/$size/apps/harbour-opencode.png
+done
 install -Dm 644 harbour-opencode.desktop -t %{buildroot}%{_datadir}/applications
 install -d %{buildroot}%{_datadir}/%{name}
 cp -r opencode-client/qml %{buildroot}%{_datadir}/%{name}/qml
@@ -129,3 +133,6 @@ fi
 %{_datadir}/%{name}/models.json
 %{_datadir}/applications/%{name}.desktop
 %{_datadir}/icons/hicolor/86x86/apps/%{name}.png
+%{_datadir}/icons/hicolor/108x108/apps/%{name}.png
+%{_datadir}/icons/hicolor/128x128/apps/%{name}.png
+%{_datadir}/icons/hicolor/172x172/apps/%{name}.png
