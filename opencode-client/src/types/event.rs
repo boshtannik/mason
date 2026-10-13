@@ -1334,13 +1334,20 @@ pub struct ServerInstanceDisposedProperties {
 }
 
 impl Event {
-    /// Id + text of the accumulated text part (message.part.updated, text).
-    /// The only exhaustive match; we list all variants without a catch-all.
-    pub fn text_part(&self) -> Option<(&str, &str, String)> {
+    /// sessionID + messageID + part.id + text of the accumulated text part
+    /// (message.part.updated, text). The session is needed to speak only the
+    /// chat that is on screen. The only exhaustive match; we list all variants
+    /// without a catch-all.
+    pub fn text_part(&self) -> Option<(&str, &str, &str, String)> {
         match self {
             Event::MessagePartUpdated { properties } => match &properties.part {
                 Part::Text { id, messageID, text, ignored, .. } if *ignored != Some(true) => {
-                    Some((messageID.as_str(), id.as_str(), text.clone()))
+                    Some((
+                        properties.sessionID.as_str(),
+                        messageID.as_str(),
+                        id.as_str(),
+                        text.clone(),
+                    ))
                 }
                 Part::Text { .. }
                 | Part::Reasoning { .. }

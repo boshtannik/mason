@@ -13,12 +13,13 @@ ApplicationWindow {
     // (CoverPage.qml). Defined inline below so it closes over `app`.
     cover: coverComponent
 
-    // RAII-ish: leaving the app must silence everything. This stops any
-    // playback and asks the worker to cancel a synthesis still in flight; on
-    // exit the worker also kills the piper/whisper children (kill_on_drop).
+    // Playback is NOT cut when the app is minimized: TTS keeps speaking in the
+    // background (KeepAlive below keeps the process up while it speaks) and the
+    // cover's second action turns into "stop" for as long as TTS is active.
     // NOTE: `onClosing` is NOT usable on Silica's ApplicationWindow (private
-    // Window) — assigning it yields a blank window. Use applicationActive.
-    onApplicationActiveChanged: if (!applicationActive) app.stopTts()
+    // Window) — assigning it yields a blank window (the old RAII "silence on
+    // leave" via applicationActive is gone on purpose: it swapped the app for
+    // the cover and killed the speech mid-answer).
 
     // Source of truth for the feed (plain JS array; poll() builds it with
     // concat/slice). The ListView does NOT use it directly — it is mirrored
@@ -278,10 +279,13 @@ ApplicationWindow {
         key: "/apps/harbour-opencode/sessionModes"
     }
 
-    // Keep the process alive while the agent works (otherwise Sailfish puts it to sleep in the background).
+    // Keep the process alive while the agent works OR speech is being
+    // synthesised/played (otherwise Sailfish puts it to sleep in the background
+    // and the answer being read out stops mid-sentence when minimized).
     KeepAlive {
         id: agentKeepAlive
         enabled: app.statusBase(app.statusText) === "busy"
+                 || app.ttsPlaying || app.ttsSynth
     }
 
     // Pool of "dings": SoundEffect cannot be restarted while playing, so
@@ -363,6 +367,11 @@ ApplicationWindow {
         }
     }
     function playNextTts() {
+        // Never speak over the user's dictation: while the mic records or the
+        // recognizer runs, defer (the queue stays; the handlers below wake it
+        // when the dictation ends).
+        if (app.recording || app.recognizing)
+            return
         if (app.ttsQueue.length === 0) {
             app.ttsPlaying = false
             app.ttsSynth = false
@@ -378,6 +387,10 @@ ApplicationWindow {
         app.ttsSynth = false
         ttsPlayer.play()
     }
+    // Dictation finished (recording released, recognition done) → wake the
+    // speech that playNextTts deferred while the mic was busy.
+    onRecordingChanged: if (!recording && !recognizing) app.playNextTts()
+    onRecognizingChanged: if (!recording && !recognizing) app.playNextTts()
     function ttsEnqueue(path, body) {
         if (path === "" || path === undefined)
             return
@@ -802,6 +815,10 @@ ApplicationWindow {
     }
     function startPttHold() {
         if (!app.recording) {
+            // The mic and the speaker must never fight: silence any ongoing
+            // speech first (stops playback, drops queued and still-synthesising
+            // WAVs) — the dictation takes priority.
+            app.stopTts()
             app.recognizing = false
             app.recording = true
             app.voiceCmd(app.cmdRecordStart, "")
@@ -810,8 +827,11 @@ ApplicationWindow {
     function stopPttHold() {
         dictationTimer.stop()
         if (app.recording) {
-            app.recording = false
+            // recognizing FIRST, then recording=false: the resume handlers
+            // above only wake playback when BOTH are off, so speech cannot
+            // start in the gap before recognition begins.
             app.recognizing = true
+            app.recording = false
             app.voiceCmd(app.cmdRecordStop, "")
         }
     }
@@ -1495,14 +1515,22 @@ ApplicationWindow {
                         app.newSession()
                     }
                 }
-                // Second action — the icon follows the input mode:
+                // Second action — the icon follows what the user needs most:
+                // while TTS is active → stop (silences playback WITHOUT pulling
+                // the app to the foreground); otherwise by input mode:
                 // text-only → pen (opens the app, focuses the prompt input);
                 // voice/text+PTT → mic (starts a dictation).
                 CoverAction {
-                    iconSource: app.inputMode === "text"
-                                ? "image://theme/icon-m-edit"
-                                : "image://theme/icon-m-mic"
+                    iconSource: (app.ttsPlaying || app.ttsSynth)
+                                ? "image://theme/icon-m-stop"
+                                : (app.inputMode === "text"
+                                   ? "image://theme/icon-m-edit"
+                                   : "image://theme/icon-m-mic")
                     onTriggered: {
+                        if (app.ttsPlaying || app.ttsSynth) {
+                            app.stopTts()
+                            return
+                        }
                         app.activate()
                         if (app.inputMode === "text")
                             app.quickComposeRequested()

@@ -385,6 +385,10 @@ async fn run_stream(
     // and sorting by value would shuffle the answer. Each part is also spoken
     // as its OWN auto-TTS job, bound to its own bubble.
     let mut text_order: Vec<String> = Vec::new();
+    // Text part.ids already queued for auto-TTS. A part is spoken as soon as
+    // its bubble is final (text-end during the turn — no waiting for idle), so
+    // the fallback idle pass must not queue it a second time.
+    let mut spoken_parts: std::collections::HashSet<String> = Default::default();
     // Periodically refresh sessions list (tick every 200ms; query roughly every 3s).
     let mut ticks: u32 = 0;
 
@@ -450,7 +454,7 @@ async fn run_stream(
                         if let Some(mid) = ev.payload.assistant_message_id() {
                             assistant_messages.insert(mid.to_string());
                         }
-                        if let Some((mid, id, text)) = ev.payload.text_part() {
+                        if let Some((sid, mid, id, text)) = ev.payload.text_part() {
                             if assistant_messages.contains(mid) {
                                 let was_live = text_live.contains_key(id);
                                 if parts.insert(id.to_string(), text.clone()).is_none() {
@@ -467,6 +471,33 @@ async fn run_stream(
                                         let body =
                                             format!("{ANSWER_LIVE_TAG}{}", text.trim_end());
                                         q.push(proto_line(now_ms(), &body));
+                                    }
+                                    // Auto-TTS: the bubble is final — speak it NOW,
+                                    // no waiting for idle (a long turn with tool
+                                    // calls would otherwise hold all speech back).
+                                    // Only for the session on screen, and never
+                                    // while the user dictates. spoken_parts keeps
+                                    // the part from being spoken twice (the idle
+                                    // pass below is the fallback).
+                                    let tts_mode = voice
+                                        .tts_mode
+                                        .lock()
+                                        .map(|m| *m)
+                                        .unwrap_or_default();
+                                    if tts_mode == voice::TtsMode::Auto
+                                        && current_session.as_deref() == Some(sid)
+                                        && !voice.dictating()
+                                        && spoken_parts.insert(id.to_string())
+                                    {
+                                        log::info!(
+                                            "auto-TTS: part {id} is final, queuing speech"
+                                        );
+                                        voice::tts_from_call(
+                                            &voice,
+                                            text.trim_end(),
+                                            &worker_pending,
+                                        )
+                                        .await;
                                     }
                                 }
                             }
@@ -604,9 +635,17 @@ async fn run_stream(
                                         .unwrap_or_default();
                                     if tts_mode == voice::TtsMode::Auto {
                                         for pid in &text_order {
+                                            // Parts already spoken at text-end
+                                            // (spoken_parts) must not repeat; the
+                                            // rest is the fallback for parts whose
+                                            // text-end landed while dictating.
+                                            if spoken_parts.contains(pid) || voice.dictating() {
+                                                continue;
+                                            }
                                             if let Some(p) = parts.get(pid) {
                                                 let p = p.trim_end();
                                                 if !p.is_empty() {
+                                                    spoken_parts.insert(pid.clone());
                                                     voice::tts_from_call(&voice, p, &worker_pending)
                                                         .await;
                                                 }
@@ -618,6 +657,7 @@ async fn run_stream(
                                 parts.clear();
                                 text_live.clear();
                                 text_order.clear();
+                                spoken_parts.clear();
                                 reasonings.clear();
                                 reasoning_order.clear();
                                 reasoning_part_ids.clear();
@@ -662,6 +702,7 @@ reasonings.clear();
                                         reasoning_order.clear();
                                         text_live.clear();
                                         text_order.clear();
+                                        spoken_parts.clear();
                                         last_answer_push = 0;
                                     clear_tools(&dispatcher, &tools).await;
                                     refresh_sessions(&client, &sessions).await;
@@ -687,6 +728,7 @@ reasonings.clear();
                             reasoning_order.clear();
                             text_live.clear();
                             text_order.clear();
+                            spoken_parts.clear();
                             last_answer_push = 0;
                             clear_tools(&dispatcher, &tools).await;
                             load_history(&client, id, &worker_pending).await;
@@ -710,6 +752,7 @@ reasonings.clear();
                                         reasoning_order.clear();
                                         text_live.clear();
                                         text_order.clear();
+                                        spoken_parts.clear();
                                         last_answer_push = 0;
                                         clear_tools(&dispatcher, &tools).await;
                                         load_history(&client, new_id, &worker_pending).await;
@@ -951,6 +994,7 @@ reasonings.clear();
                                         reasoning_order.clear();
                                         text_live.clear();
                                         text_order.clear();
+                                        spoken_parts.clear();
                                         last_answer_push = 0;
                                         clear_tools(&dispatcher, &tools).await;
                                         set_current_session(&current_session_shared, &current_session);

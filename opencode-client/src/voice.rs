@@ -6,7 +6,7 @@ use crate::cmd::Cmd;
 use crate::i18n::{now_ms, svc_line};
 use crate::markers::*;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -215,9 +215,20 @@ pub struct VoiceState {
     /// Whether a transcription task is running right now. TTS defers while STT runs,
     /// so the two engines don't saturate the CPU at the same time.
     pub stt_busy: Arc<std::sync::Mutex<bool>>,
-    /// Whether a synthesis task is running right now. Only one piper at a time:
-    /// two parallel answers would race on their output files.
-    pub tts_busy: Arc<std::sync::Mutex<bool>>,
+    /// FIFO of texts waiting for synthesis plus the single-pump flag. Synthesis
+    /// must keep the order in which the parts arrived: the parts of one answer
+    /// are queued as they finish and playback has to follow the text order
+    /// (parallel per-part tasks used to race on a busy flag and a late part
+    /// could play after the last one).
+    pub tts_pipeline: Arc<std::sync::Mutex<TtsPipeline>>,
+}
+
+/// FIFO state of the synthesis pipeline (see [VoiceState::tts_pipeline]).
+#[derive(Default)]
+pub struct TtsPipeline {
+    pub queue: VecDeque<String>,
+    /// True while the pump task lives: queued texts will be processed.
+    pub running: bool,
 }
 
 impl VoiceState {
@@ -229,6 +240,15 @@ impl VoiceState {
         v.load_config();
         v.refresh_status();
         v
+    }
+
+    /// True while the user dictates: the microphone is recording or the
+    /// recognizer is running. TTS must neither synthesise nor play over the
+    /// user's own voice, so the pump waits for this to go false.
+    pub fn dictating(&self) -> bool {
+        let rec = self.rec.lock().map(|g| g.is_some()).unwrap_or(false);
+        let stt = self.stt_busy.lock().map(|b| *b).unwrap_or(false);
+        rec || stt
     }
 
     /// Restore the STT/TTS/language choice from the file (called at startup).
@@ -1230,43 +1250,82 @@ pub async fn run_tts(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::syn
     }
 }
 
-/// TTS entry point from QML: spawns the playback task for the given text.
+/// TTS entry point (auto mode per answer part, or the speak button): append the
+/// text to the strict FIFO and start the single pump task if it is not running.
+/// The pump synthesises the queue one item at a time, in arrival order — the
+/// old spawn-per-part design raced on a busy flag and unrelated parts could be
+/// synthesised out of order (a late part jumped in after the last one).
 pub async fn tts_from_call(voice: &Arc<VoiceState>, text: &str, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
-    let voice2 = voice.clone();
-    let pending2 = pending.clone();
-    let text = text.to_string();
+    let text = text.trim_end().to_string();
+    if text.trim().is_empty() {
+        return;
+    }
     // New synthesis = clear the cancel request left by the previous stop.
     if let Ok(mut c) = voice.cancel_tts.lock() {
         *c = false;
     }
-    tokio::spawn(async move {
-        // Serialize the engines: wait while STT or another synthesis is running (they share
-        // the CPU). The busy flag is claimed ATOMICALLY under its own lock — several
-        // auto-TTS parts may start at once. A fresh "stop" aborts the queued
-        // synthesis instead of starting it later.
-        loop {
-            {
-                let mut tts = match voice2.tts_busy.lock() {
-                    Ok(g) => g,
-                    Err(_) => return,
-                };
-                let stt = voice2.stt_busy.lock().map(|b| *b).unwrap_or(false);
-                if !*tts && !stt {
-                    *tts = true;
-                    break;
-                }
+    let spawn = match voice.tts_pipeline.lock() {
+        Ok(mut p) => {
+            p.queue.push_back(text);
+            if p.running {
+                false
+            } else {
+                p.running = true;
+                true
             }
-            if voice2.cancel_tts.lock().map(|c| *c).unwrap_or(false) {
-                log::info!("TTS: отменено во время ожидания");
+        }
+        Err(_) => return,
+    };
+    if spawn {
+        let voice2 = voice.clone();
+        let pending2 = pending.clone();
+        tokio::spawn(async move {
+            run_tts_pump(&voice2, &pending2).await;
+        });
+    }
+}
+
+/// Single synthesis runner: drains [VoiceState::tts_pipeline] strictly in order.
+/// Waits while the user dictates (microphone/recognition running) so TTS never
+/// overlaps their speech. A stop request empties the queue and releases the
+/// pump, so nothing queued can start after the user pressed stop.
+async fn run_tts_pump(voice: &Arc<VoiceState>, pending: &Arc<std::sync::Mutex<Vec<String>>>) {
+    loop {
+        while voice.dictating() {
+            if voice.cancel_tts.lock().map(|c| *c).unwrap_or(false) {
+                stop_pump(voice, true);
                 return;
             }
             tokio::time::sleep(Duration::from_millis(120)).await;
         }
-        run_tts(&voice2, &text, &pending2).await;
-        if let Ok(mut b) = voice2.tts_busy.lock() {
-            *b = false;
+        if voice.cancel_tts.lock().map(|c| *c).unwrap_or(false) {
+            stop_pump(voice, true);
+            return;
         }
-    });
+        let next = match voice.tts_pipeline.lock() {
+            Ok(mut p) => p.queue.pop_front(),
+            Err(_) => return,
+        };
+        match next {
+            Some(text) => run_tts(voice, &text, pending).await,
+            None => {
+                stop_pump(voice, false);
+                return;
+            }
+        }
+    }
+}
+
+/// Release the pump; on cancel also drop everything still queued (nothing else
+/// may start after the user pressed stop).
+fn stop_pump(voice: &VoiceState, cancelled: bool) {
+    if let Ok(mut p) = voice.tts_pipeline.lock() {
+        if cancelled && !p.queue.is_empty() {
+            log::info!("TTS: cancel — dropping {} queued item(s)", p.queue.len());
+            p.queue.clear();
+        }
+        p.running = false;
+    }
 }
 
 /// Handle voice module commands (from the QML queue).
