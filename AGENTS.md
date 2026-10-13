@@ -1,6 +1,6 @@
 # AGENTS.md — notes for AI agents / contributors
 
-`mason` (packaged as `harbour-opencode`) is a native opencode client for
+`harbour-opencode` is a native opencode client for
 Sailfish OS: Rust backend (`opencode-client/src`) + Silica QML UI
 (`opencode-client/qml`). It bundles a native arm64 `opencode` CLI and talks to
 `opencode serve` over HTTP + SSE.

@@ -1,6 +1,6 @@
-# mason — native opencode client for Sailfish OS
+# harbour-opencode — native opencode client for Sailfish OS
 
-> Codename **mason**; packaged and distributed as **harbour-opencode**.
+> Packaged and distributed as **harbour-opencode**.
 
 Native [opencode](https://opencode.ai) client for **Sailfish OS**.
 
@@ -17,18 +17,18 @@ Built and tested on a Sony Xperia 10 IV running Sailfish OS 5.1.0.11 (aarch64).
 
 <table>
   <tr>
-    <td align="center"><img src="screenshots/photo_1_2026-10-13_04-24-18.jpg" width="240" alt="mason screenshot 1"></td>
-    <td align="center"><img src="screenshots/photo_2_2026-10-13_04-24-18.jpg" width="240" alt="mason screenshot 2"></td>
+    <td align="center"><img src="screenshots/photo_1_2026-10-13_04-24-18.jpg" width="240" alt="screenshot 1"></td>
+    <td align="center"><img src="screenshots/photo_2_2026-10-13_04-24-18.jpg" width="240" alt="screenshot 2"></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/photo_3_2026-10-13_04-24-18.jpg" width="240" alt="mason screenshot 3"></td>
-    <td align="center"><img src="screenshots/photo_4_2026-10-13_04-24-18.jpg" width="240" alt="mason screenshot 4"></td>
+    <td align="center"><img src="screenshots/photo_3_2026-10-13_04-24-18.jpg" width="240" alt="screenshot 3"></td>
+    <td align="center"><img src="screenshots/photo_4_2026-10-13_04-24-18.jpg" width="240" alt="screenshot 4"></td>
   </tr>
 </table>
 
 ## How it works
 
-`mason` runs the opencode agent **entirely in your pocket**. The thinking happens in
+The client runs the opencode agent **entirely in your pocket**. The thinking happens in
 the cloud; the work happens on the device:
 
 ```
