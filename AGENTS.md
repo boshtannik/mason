@@ -24,11 +24,19 @@ These are not suggestions — they are the owner's explicit preferences. Keep th
    implemented*. The goal: the logs must make the **degree of agreement between
    our UI and the native opencode server** visible at a glance. Example:
    `opencode-client/src/event/dispatcher.rs` (`note_unimplemented`) warns, once
-   per event type, `"event '<type>' is not implemented in the UI — dispatch
+   per event type, `"event '<type>' is not implemented in the UI yet — dispatch
    branch ignores it"`. Same idea in `human_session_error` (unknown error kind) and
    the history loader in `main.rs` (unknown message-part type).
    Rationale: the project may be released as open source; contributors must be
    able to see where the client lags the server.
+
+   **Coverage is still partial.** The server's event union is large and only a
+   fraction of event types are actually handled; the rest are logged and
+   ignored. Which is which is decided in exactly one place:
+   `opencode-client/src/event/dispatcher.rs` — the `dispatch` match is the
+   single hub for "what a server event does". New handling starts there
+   (streaming/error handlers already live next to it), and this file is where
+   the degree of agreement with the server becomes visible.
 
 4. **Log messages are in English.** This is an international / open-source
    project — every `log::warn!` / `log::error!` / `log::info!` message (and

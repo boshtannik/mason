@@ -24,10 +24,6 @@ use opencode_client::voice;
 const MAIN_QML: &str = "qml/harbour-opencode.qml";
 /// Application name: determines both the data directory `SailfishApp::pathTo` and argv[0].
 const APP_NAME: &str = "harbour-opencode";
-/// Minimum interval between live `[[thinklive]]` reasoning pushes. Throttles a
-/// long thinking phase so the QML queue is not flooded with hundreds of tiny
-/// chunks; the final full text is always sent once at reasoning-end/idle.
-const REASONING_LIVE_MS: u64 = 150;
 
 /// Logger writes both to stderr and to `~/.cache/harbour-opencode/app.log`
 /// (when running via booster, stdout is inherited and lost).
@@ -405,22 +401,6 @@ async fn run_stream(
             item = stream.next() => {
                 match item {
                     Some(Ok(ev)) => {
-                        if let opencode_client::types::event::Event::SessionError { properties } = &ev.payload {
-                            // Classify by error type (see human_session_error):
-                            // provider auth, API/quota error, output length limit,
-                            // interruption, unknown. Empty message means an event without error
-                            // (e.g. empty sessionID) — skip it.
-                            let msg = opencode_client::types::event::human_session_error(properties.error.as_ref());
-                            if msg.is_empty() {
-                                log::debug!("session.error без error-поля, пропускаю");
-                                continue;
-                            }
-                            log::error!("session.error: {msg}");
-                            if let Ok(mut q) = worker_pending.lock() {
-                                q.push(err_line(now_ms(), i18n::K_SERVER_ERROR, &[msg]));
-                            }
-                            set_status(&status, "error");
-                        }
                         // The server reports its own retry state (retryable model
                         // errors such as a failed URL call or an exhausted quota):
                         // `session.status` carries the human message, the attempt
@@ -448,11 +428,23 @@ async fn run_stream(
                                 }
                             }
                         }
-                        let mut st = dispatcher.lock().await;
-                        let changed = event::dispatcher::dispatch(&ev.payload, &mut st).await;
-                        drop(st);
-                        if let Some(mid) = ev.payload.assistant_message_id() {
-                            assistant_messages.insert(mid.to_string());
+                        {
+                            // The event hub (`dispatch`) owns what each server
+                            // event does; we only lend it the streaming
+                            // accumulators for this turn.
+                            let mut stream = event::dispatcher::StreamState {
+                                pending: &*worker_pending,
+                                status: &*status,
+                                assistant_messages: &mut assistant_messages,
+                                reasonings: &mut reasonings,
+                                reasoning_part_ids: &reasoning_part_ids,
+                                live_reasoned_ids: &mut live_reasoned_ids,
+                                last_reasoning_push: &mut last_reasoning_push,
+                                text_live: &mut text_live,
+                                last_answer_push: &mut last_answer_push,
+                            };
+                            let mut st = dispatcher.lock().await;
+                            let _ = event::dispatcher::dispatch(&ev.payload, &mut st, &mut stream).await;
                         }
                         if let Some((sid, mid, id, text)) = ev.payload.text_part() {
                             if assistant_messages.contains(mid) {
@@ -518,58 +510,6 @@ async fn run_stream(
                                         let body =
                                             format!("{THINK_LIVE_TAG}{}", text.trim_end());
                                         q.push(proto_line(now_ms(), &body));
-                                    }
-                                }
-                            }
-                        }
-                        // Live reasoning chunks (message.part.delta, field "text"):
-                        // append to the part accumulator and stream to QML (throttled)
-                        // so thinking grows in the bubble WHILE the model works.
-                        if let opencode_client::types::event::Event::MessagePartDelta { properties } =
-                            &ev.payload
-                        {
-                            let id = &properties.partID;
-                            if properties.field == "text"
-                                && assistant_messages.contains(&properties.messageID)
-                                && reasoning_part_ids.contains(id)
-                            {
-                                let entry = reasonings.entry(id.clone()).or_default();
-                                entry.push_str(&properties.delta);
-                                if !entry.trim().is_empty() {
-                                    let now = now_ms();
-                                    if now.saturating_sub(last_reasoning_push) >= REASONING_LIVE_MS {
-                                        last_reasoning_push = now;
-                                        live_reasoned_ids.insert(id.clone());
-                                        if let Ok(mut q) = worker_pending.lock() {
-                                            let body =
-                                                format!("{THINK_LIVE_TAG}{}", entry.trim_end());
-                                            q.push(proto_line(now, &body));
-                                        }
-                                    }
-                                }
-                            } else if properties.field == "text"
-                                && assistant_messages.contains(&properties.messageID)
-                                && !reasoning_part_ids.contains(id)
-                            {
-                                // Text-part deltas — the answer is streamed LIVE,
-                                // exactly like opencode's TUI grows the text part
-                                // on every `text-delta`. Previously these deltas
-                                // were discarded and the whole answer popped in at
-                                // idle (a "wall of text" instead of watching the
-                                // model type). The accumulated text travels as
-                                // [[answerlive]] and grows the trailing answer
-                                // bubble in place (throttled).
-                                let entry = text_live.entry(id.clone()).or_default();
-                                entry.push_str(&properties.delta);
-                                if !entry.trim().is_empty() {
-                                    let now = now_ms();
-                                    if now.saturating_sub(last_answer_push) >= REASONING_LIVE_MS {
-                                        last_answer_push = now;
-                                        if let Ok(mut q) = worker_pending.lock() {
-                                            let body =
-                                                format!("{ANSWER_LIVE_TAG}{}", entry.trim_end());
-                                            q.push(proto_line(now, &body));
-                                        }
                                     }
                                 }
                             }
@@ -667,7 +607,6 @@ async fn run_stream(
                                 refresh_sessions(&client, &sessions).await;
                             }
                         }
-                        let _ = changed;
                     }
                     Some(Err(e)) => log::error!("sse error: {e}"),
                     None => {
