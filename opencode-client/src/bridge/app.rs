@@ -162,7 +162,33 @@ pub struct AppBridge {
         let id = id.to_string();
         log::info!("QML fork_session {id:?}");
         if !id.is_empty() {
-            self.push_command(Cmd::Fork { id }.to_value());
+            self.push_command(Cmd::Fork { id, message: None }.to_value());
+        }
+    }),
+    /// QML: fork a session at a message (branch from that point).
+    fork_from: qt_method!(fn fork_from(&self, id: QString, message: QString) {
+        let id = id.to_string();
+        let message = message.to_string();
+        log::info!("QML fork_from {id:?} @ {message:?}");
+        if !id.is_empty() && !message.is_empty() {
+            self.push_command(Cmd::Fork { id, message: Some(message) }.to_value());
+        }
+    }),
+    /// QML: revert the session tail starting at a message.
+    revert_to: qt_method!(fn revert_to(&self, id: QString, message: QString) {
+        let id = id.to_string();
+        let message = message.to_string();
+        log::info!("QML revert_to {id:?} @ {message:?}");
+        if !id.is_empty() && !message.is_empty() {
+            self.push_command(Cmd::Revert { id, message }.to_value());
+        }
+    }),
+    /// QML: restore a previously reverted tail.
+    unrevert_session: qt_method!(fn unrevert_session(&self, id: QString) {
+        let id = id.to_string();
+        log::info!("QML unrevert_session {id:?}");
+        if !id.is_empty() {
+            self.push_command(Cmd::Unrevert { id }.to_value());
         }
     }),
     /// QML: share a session (get a link).

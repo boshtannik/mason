@@ -13,6 +13,26 @@
         <source>Agent prompt…</source>
         <translation>Підказка агенту…</translation>
     </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="640"/>
+        <source>Fork from here</source>
+        <translation>Відгалузити звідси</translation>
+    </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="644"/>
+        <source>Revert to here</source>
+        <translation>Відкотити сюди</translation>
+    </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="777"/>
+        <source>History reverted</source>
+        <translation>Історію відкочено</translation>
+    </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="789"/>
+        <source>Restore</source>
+        <translation>Відновити</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -268,8 +288,8 @@ long press — remove</source>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="276"/>
-        <source>Show tools strip</source>
-        <translation>Показувати панель інструментів</translation>
+        <source>Show tool calls</source>
+        <translation>Показувати виклики інструментів</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="305"/>

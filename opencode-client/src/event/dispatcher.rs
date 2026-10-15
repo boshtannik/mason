@@ -4,23 +4,32 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::i18n::{err_line, now_ms};
-use crate::markers::{proto_line, ANSWER_LIVE_TAG, THINK_LIVE_TAG};
+use crate::markers::{proto_line, proto_tool_line, ANSWER_LIVE_TAG, SET_MSG_ID_TAG, THINK_LIVE_TAG};
 use crate::state::permission::PermissionQueue;
 use crate::state::question::QuestionQueue;
 use crate::state::session::SessionFsm;
 use crate::state::tool::ToolStore;
 use crate::types::event::{
     human_session_error, Event, MessagePartDeltaProperties, MessageUpdatedProperties,
-    SessionErrorProperties,
+    SessionErrorProperties, SessionNextShellEndedProperties, SessionNextShellStartedProperties,
+    SessionNextToolCalledProperties, SessionNextToolFailedProperties,
+    SessionNextToolInputDeltaProperties, SessionNextToolInputEndedProperties,
+    SessionNextToolInputStartedProperties, SessionNextToolProgressProperties,
+    SessionNextToolSuccessProperties,
 };
 use crate::types::message::Message;
 use crate::types::permission::Permission;
+use crate::types::tool::ToolState;
 use crate::types::QuestionRequest;
 
 /// Minimum interval between two live pushes (reasoning or answer) — throttles a
 /// long model turn so the QML queue is not flooded with tiny chunks. The final
 /// full text is always sent once at `message.part.updated`/idle.
 const REASONING_LIVE_MS: u64 = 150;
+
+/// Display name for the agent's persistent shell (`session.next.shell.*`),
+/// which carries a command but no tool name of its own.
+const SHELL_TOOL_NAME: &str = "bash";
 
 /// Handles the streaming accumulators need: the QML out-queue and the status
 /// string, plus the per-connection accumulators for the live chat rendering.
@@ -49,6 +58,14 @@ pub struct StreamState<'a> {
     pub text_live: &'a mut HashMap<String, String>,
     /// Timestamp of the last live answer push (throttle).
     pub last_answer_push: &'a mut u64,
+    /// Session currently shown in the UI (only its user messages are tracked
+    /// for revert/fork — a user message of another session is ignored).
+    pub current_session: Option<&'a str>,
+    /// Set when the worker has just sent a prompt and is waiting for the
+    /// user-message id from `message.updated`; cleared once captured (see
+    /// `on_message_updated`). Prevents attaching a replayed id to the wrong
+    /// bubble.
+    pub expect_user_id: &'a mut bool,
 }
 
 /// Applies an event to the state. Returns bool — "state changed" (redraw the UI).
@@ -116,6 +133,18 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
             if let crate::types::message::Part::Tool { callID, tool, state: ts, .. } = &properties.part
             {
                 state.tools.upsert(callID.clone(), tool.clone(), ts.clone());
+                // Emit an inline tool row: one feed line per callID, re-sent on
+                // every state change so QML can replace it in place (TUI-style
+                // inline tool calls in the transcript).
+                if let Ok(mut q) = stream.pending.lock() {
+                    q.push(proto_tool_line(
+                        now_ms(),
+                        callID,
+                        tool,
+                        ts.ui_status(),
+                        &ts.description(),
+                    ));
+                }
             }
             true
         }
@@ -179,6 +208,46 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
             on_session_error(stream, properties);
             true
         }
+        // Tool / shell activity of the agent (`session.next.tool.*` and
+        // `session.next.shell.*`). These feed `state.tools`, which the UI polls
+        // as a compact activity strip so bash / read / edit / webfetch are
+        // visible WHILE the agent works instead of the chat going silent.
+        Event::SessionNextToolInputStarted { properties } => {
+            on_tool_input_started(state, properties);
+            true
+        }
+        Event::SessionNextToolInputDelta { properties } => {
+            on_tool_input_delta(state, properties);
+            true
+        }
+        Event::SessionNextToolInputEnded { properties } => {
+            on_tool_input_ended(state, properties);
+            true
+        }
+        Event::SessionNextToolCalled { properties } => {
+            on_tool_called(state, properties);
+            true
+        }
+        Event::SessionNextToolProgress { properties } => {
+            on_tool_progress(state, properties);
+            true
+        }
+        Event::SessionNextToolSuccess { properties } => {
+            on_tool_success(state, properties);
+            true
+        }
+        Event::SessionNextToolFailed { properties } => {
+            on_tool_failed(state, properties);
+            true
+        }
+        Event::SessionNextShellStarted { properties } => {
+            on_shell_started(state, properties);
+            true
+        }
+        Event::SessionNextShellEnded { properties } => {
+            on_shell_ended(state, properties);
+            true
+        }
         // Everything else is not yet implemented in the UI. These branches are
         // listed exhaustively (no catch-all) so the compiler forces us to
         // revisit them when the event union grows. Each one is logged so the
@@ -199,8 +268,6 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
         | Event::SessionNextPromptAdmitted { .. }
         | Event::SessionNextContextUpdated { .. }
         | Event::SessionNextSynthetic { .. }
-        | Event::SessionNextShellStarted { .. }
-        | Event::SessionNextShellEnded { .. }
         | Event::SessionNextStepStarted { .. }
         | Event::SessionNextStepEnded { .. }
         | Event::SessionNextStepFailed { .. }
@@ -210,13 +277,6 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
         | Event::SessionNextReasoningStarted { .. }
         | Event::SessionNextReasoningDelta { .. }
         | Event::SessionNextReasoningEnded { .. }
-        | Event::SessionNextToolInputStarted { .. }
-        | Event::SessionNextToolInputDelta { .. }
-        | Event::SessionNextToolInputEnded { .. }
-        | Event::SessionNextToolCalled { .. }
-        | Event::SessionNextToolProgress { .. }
-        | Event::SessionNextToolSuccess { .. }
-        | Event::SessionNextToolFailed { .. }
         | Event::SessionNextRetried { .. }
         | Event::SessionNextCompactionStarted { .. }
         | Event::SessionNextCompactionDelta { .. }
@@ -263,9 +323,22 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
 
 /// `message.updated` — register assistant message ids, so that only the text
 /// parts of assistant messages feed the answer (user/echo parts are ignored).
+/// A user message of the *shown* session, arriving right after we sent a prompt,
+/// yields its `messageID` to QML (control line `[[msgid]]<id>`), so the freshly
+/// created user bubble can offer revert/fork like the ones loaded from history.
 fn on_message_updated(stream: &mut StreamState<'_>, props: &MessageUpdatedProperties) {
-    if let Message::Assistant { id, .. } = &props.info {
-        stream.assistant_messages.insert(id.clone());
+    match &props.info {
+        Message::Assistant { id, .. } => {
+            stream.assistant_messages.insert(id.clone());
+        }
+        Message::User { id, sessionID, .. } => {
+            if *stream.expect_user_id && stream.current_session == Some(sessionID.as_str()) {
+                *stream.expect_user_id = false;
+                if let Ok(mut q) = stream.pending.lock() {
+                    q.push(format!("{SET_MSG_ID_TAG}{id}"));
+                }
+            }
+        }
     }
 }
 
@@ -329,6 +402,173 @@ fn on_session_error(stream: &mut StreamState<'_>, props: &SessionErrorProperties
     }
     if let Ok(mut s) = stream.status.lock() {
         *s = "error".to_string();
+    }
+}
+
+// ── Tool / shell activity ────────────────────────────────────────────────
+//
+// The agent's tool calls are tracked in `state.tools` (callID -> name+state).
+// The UI polls a JSON snapshot of it every second and renders a compact strip,
+// so bash / read / edit / webfetch stay visible WHILE the turn runs instead of
+// the chat going silent.
+
+/// `session.next.tool.input.started` — the model begins streaming a tool call;
+/// we know the tool name, not yet its arguments.
+fn on_tool_input_started(
+    state: &mut DispatcherState,
+    props: &SessionNextToolInputStartedProperties,
+) {
+    state.tools.upsert(
+        props.callID.clone(),
+        props.name.clone(),
+        ToolState::Pending {
+            input: serde_json::Value::Null,
+        },
+    );
+}
+
+/// `session.next.tool.input.delta` — a fragment of the tool-call arguments
+/// (JSON being streamed). Accumulate it into the pending entry's description.
+fn on_tool_input_delta(state: &mut DispatcherState, props: &SessionNextToolInputDeltaProperties) {
+    let call = props.callID.as_str();
+    if state.tools.name_of(call).is_none() {
+        state.tools.ensure(call, "");
+    }
+    let prev = state.tools.input_of(call);
+    let mut s = prev.as_str().unwrap_or("").to_string();
+    s.push_str(&props.delta);
+    state.tools.set_state(
+        call,
+        ToolState::Pending {
+            input: serde_json::Value::String(s),
+        },
+    );
+}
+
+/// `session.next.tool.input.ended` — the arguments are complete as a raw JSON
+/// string; parse them so the description can pick `command`/`filePath`/…
+fn on_tool_input_ended(state: &mut DispatcherState, props: &SessionNextToolInputEndedProperties) {
+    let call = props.callID.as_str();
+    if state.tools.name_of(call).is_none() {
+        state.tools.ensure(call, "");
+    }
+    let input = serde_json::from_str(&props.text)
+        .unwrap_or_else(|_| serde_json::Value::String(props.text.clone()));
+    state.tools.set_state(call, ToolState::Pending { input });
+}
+
+/// `session.next.tool.called` — the tool is invoked with parsed `input`; it is
+/// now running.
+fn on_tool_called(state: &mut DispatcherState, props: &SessionNextToolCalledProperties) {
+    state.tools.upsert(
+        props.callID.clone(),
+        props.tool.clone(),
+        ToolState::Running {
+            input: props.input.clone(),
+        },
+    );
+}
+
+/// `session.next.tool.progress` — intermediate progress; keep it running.
+fn on_tool_progress(state: &mut DispatcherState, props: &SessionNextToolProgressProperties) {
+    let call = props.callID.as_str();
+    if state.tools.name_of(call).is_none() {
+        return;
+    }
+    let input = state.tools.input_of(call);
+    state.tools.set_state(call, ToolState::Running { input });
+}
+
+/// `session.next.tool.success` — the tool finished; store a short title (from
+/// the input) plus its output.
+fn on_tool_success(state: &mut DispatcherState, props: &SessionNextToolSuccessProperties) {
+    let call = props.callID.as_str();
+    let input = state.tools.input_of(call);
+    let title = short_input(&input)
+        .or_else(|| state.tools.name_of(call).map(str::to_string))
+        .unwrap_or_else(|| "tool".to_string());
+    state.tools.set_state(
+        call,
+        ToolState::Completed {
+            input,
+            output: content_to_string(&props.content),
+            title,
+        },
+    );
+}
+
+/// `session.next.tool.failed` — the tool errored.
+fn on_tool_failed(state: &mut DispatcherState, props: &SessionNextToolFailedProperties) {
+    let call = props.callID.as_str();
+    let input = state.tools.input_of(call);
+    state.tools.set_state(
+        call,
+        ToolState::Error {
+            input,
+            error: content_to_string(&props.error),
+        },
+    );
+}
+
+/// `session.next.shell.started` — the agent's persistent shell starts a command.
+fn on_shell_started(state: &mut DispatcherState, props: &SessionNextShellStartedProperties) {
+    state.tools.upsert(
+        props.callID.clone(),
+        SHELL_TOOL_NAME.to_string(),
+        ToolState::Running {
+            input: serde_json::json!({ "command": props.command }),
+        },
+    );
+}
+
+/// `session.next.shell.ended` — the shell command finished.
+fn on_shell_ended(state: &mut DispatcherState, props: &SessionNextShellEndedProperties) {
+    let call = props.callID.as_str();
+    let input = state.tools.input_of(call);
+    let title = short_input(&input)
+        .or_else(|| state.tools.name_of(call).map(str::to_string))
+        .unwrap_or_else(|| SHELL_TOOL_NAME.to_string());
+    state.tools.set_state(
+        call,
+        ToolState::Completed {
+            input,
+            output: props.output.clone(),
+            title,
+        },
+    );
+}
+
+/// A short human label pulled from a tool-call input (command / path / …).
+fn short_input(input: &serde_json::Value) -> Option<String> {
+    for key in [
+        "command", "filePath", "path", "pattern", "query", "url", "prompt", "description",
+    ] {
+        if let Some(s) = input.get(key).and_then(|v| v.as_str()) {
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Render a tool `content`/`error` value: plain string as-is, an array of
+/// `{"text": …}` parts joined, anything else as compact JSON.
+fn content_to_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(|it| {
+                it.get("text")
+                    .and_then(|t| t.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| it.to_string())
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => other.to_string(),
     }
 }
 

@@ -55,6 +55,9 @@ ApplicationWindow {
     property var todos: []
     property var models: []
     property string currentSessionId: ""
+    // True while the session tail is reverted (worker control line [[reverted]]1):
+    // shows the "Restore reverted messages" banner above the input.
+    property bool reverted: false
     property bool showTools: showToolsSetting.value !== undefined
                             ? showToolsSetting.value : true
     // True only in a debug build: enables the mock buttons (errors/permissions).
@@ -97,6 +100,22 @@ ApplicationWindow {
     readonly property string kTtsTag: "[[tts]]"
     readonly property string kTtsStopTag: "[[ttsstop]]"
     readonly property string kSttDoneTag: "[[sttdone]]"
+    // Revert/fork plumbing (mirror of markers.rs): `kMsgIdOpen` closes the
+    // message-id marker appended to a user-history line `…[[m:<id>]]`;
+    // `kSetMsgIdTag` is a control line `[[msgid]]<id>` attaching the id of a
+    // just-sent user message to the last id-less user bubble; `kRevertedTag`
+    // is a control line `[[reverted]]<0|1>` carrying the session revert flag.
+    readonly property string kMsgIdOpen: "[[m:"
+    readonly property string kSetMsgIdTag: "[[msgid]]"
+    readonly property string kRevertedTag: "[[reverted]]"
+    // Inline tool call (mirror of markers.rs): one feed line per tool call,
+    // `[[tool]]<callID>\u001f<name>\u001f<status>\u001f<text>`, replaced in
+    // place as the call moves running → completed/error (TUI-style).
+    readonly property string kToolTag: "[[tool]]"
+    // Tool statuses (mirror of types/tool.rs STATUS_*).
+    readonly property string kStatusRunning: "running"
+    readonly property string kStatusCompleted: "completed"
+    readonly property string kStatusError: "error"
     // i18n tokens (worker sends a translation KEY; QML resolves qsTr): see
     // opencode-client/src/i18n.rs. `[[s:KEY]]` — service notice,
     // `[[e:KEY]]` — error (red bubble + notification), args after \u001f.
@@ -124,9 +143,47 @@ ApplicationWindow {
     function stripTs(s) {
         return s.replace(app.tsRe, "")
     }
+    // MessageID carried by a user line (`…[[m:<id>]]`), or "" when absent.
+    function msgIdOf(line) {
+        var b = app.stripTs(line)
+        var i = b.indexOf(app.kMsgIdOpen)
+        if (i < 0)
+            return ""
+        var j = b.indexOf(app.kTagClose, i + app.kMsgIdOpen.length)
+        if (j < 0)
+            return ""
+        return b.substring(i + app.kMsgIdOpen.length, j)
+    }
+    // User-line body without the trailing `[[m:<id>]]` marker.
+    function stripMsgId(b) {
+        var i = b.indexOf(app.kMsgIdOpen)
+        if (i < 0)
+            return b
+        var j = b.indexOf(app.kTagClose, i + app.kMsgIdOpen.length)
+        if (j < 0)
+            return b
+        return b.substring(0, i) + b.substring(j + app.kTagClose.length)
+    }
     // Feed line starts exactly with the marker-prefix (timestamp excluded).
     function lineIs(line, tag) {
         return line.indexOf(tag) === 0
+    }
+    // callID carried by an inline tool line (`[[tool]]<callID>\u001f…`), or "".
+    function toolCallId(line) {
+        var b = app.stripTs(line)
+        if (!app.lineIs(b, app.kToolTag))
+            return ""
+        var rest = b.substring(app.kToolTag.length)
+        var i = rest.indexOf(app.kArgSep)
+        return i < 0 ? rest : rest.substring(0, i)
+    }
+    // Field `idx` of an inline tool line body (0=callID, 1=name, 2=status, 3=text).
+    function toolField(line, idx) {
+        var b = app.stripTs(line)
+        if (!app.lineIs(b, app.kToolTag))
+            return ""
+        var parts = b.substring(app.kToolTag.length).split(app.kArgSep)
+        return parts[idx] !== undefined ? parts[idx] : ""
     }
     // Millisecond ts from `[[t:<ms>]]`, or current time if missing.
     function msOf(line) {
@@ -605,6 +662,62 @@ ApplicationWindow {
                         continue
                     }
 
+                    // Control line: the id of a just-sent user message
+                    // (`[[msgid]]<id>`). Attach it to the last user bubble that
+                    // still lacks an id, so revert/fork work on live messages
+                    // too (not only those restored from history).
+                    if (app.lineIs(bodyTmp, app.kSetMsgIdTag)) {
+                        var uid = bodyTmp.substring(app.kSetMsgIdTag.length).replace(/\s+$/, "")
+                        if (uid !== "") {
+                            for (var uk = acc.length - 1; uk >= 0; uk--) {
+                                var ub = app.stripTs(acc[uk])
+                                if (app.lineIs(ub, app.kUserPrefix)
+                                        && app.msgIdOf(acc[uk]) === "") {
+                                    acc[uk] = acc[uk] + app.kMsgIdOpen + uid + app.kTagClose
+                                    accMutated = true
+                                    break
+                                }
+                            }
+                        }
+                        continue
+                    }
+
+                    // Control line: the session revert flag (`[[reverted]]<0|1>`).
+                    // Drives the "Restore reverted messages" banner.
+                    if (app.lineIs(bodyTmp, app.kRevertedTag)) {
+                        app.reverted =
+                            bodyTmp.substring(app.kRevertedTag.length).replace(/\s+$/, "") === "1"
+                        continue
+                    }
+
+                    // Inline tool call ([[tool]]): one row per callID, replaced
+                    // in place as the call moves running → completed/error
+                    // (TUI-style inline tools in the transcript).
+                    if (app.lineIs(bodyTmp, app.kToolTag)) {
+                        if (!app.showTools)
+                            continue
+                        var toolId = app.toolCallId(line)
+                        if (toolId !== "") {
+                            var tIdx = -1
+                            for (var ti = 0; ti < acc.length; ti++) {
+                                if (app.toolCallId(acc[ti]) === toolId) {
+                                    tIdx = ti
+                                    break
+                                }
+                            }
+                            if (tIdx >= 0) {
+                                // Keep the original position/timestamp; refresh
+                                // only the payload (status/text).
+                                acc[tIdx] = app.kTsOpen + app.msOf(acc[tIdx])
+                                            + app.kTsClose + bodyTmp
+                                accMutated = true
+                            } else {
+                                acc = acc.concat(line)
+                            }
+                        }
+                        continue
+                    }
+
                     acc = acc.concat(line)
                 }
             }
@@ -788,6 +901,9 @@ ApplicationWindow {
         var t = ("" + text).trim()
         if (t === "")
             return
+        // A new prompt clears the revert server-side (the reverted tail is
+        // dropped on the next turn), so the banner goes away too.
+        app.reverted = false
         var acc = app.messages
         acc = acc.concat(app.kTsOpen + Date.now() + app.kTsClose
                         + app.kUserPrefix + t)
@@ -931,6 +1047,35 @@ ApplicationWindow {
         app.messages = []
         app.currentSessionId = ""
         bridge.fork_session(id)
+    }
+
+    // Fork the current session at a message (long-press menu on a user bubble).
+    function forkFrom(msgId) {
+        var sid = app.currentSessionId
+        if (!msgId || sid === "")
+            return
+        app.messages = []
+        app.currentSessionId = ""
+        app.reverted = false
+        bridge.fork_from(sid, msgId)
+    }
+
+    // Revert the current session tail starting at a user message.
+    function revertTo(msgId) {
+        var sid = app.currentSessionId
+        if (!msgId || sid === "")
+            return
+        app.messages = []
+        bridge.revert_to(sid, msgId)
+    }
+
+    // Restore the reverted tail (banner button).
+    function unrevertSession() {
+        var sid = app.currentSessionId
+        if (sid === "")
+            return
+        app.messages = []
+        bridge.unrevert_session(sid)
     }
 
     function shareSession(id) { bridge.share_session(id) }

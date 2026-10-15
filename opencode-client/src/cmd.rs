@@ -33,6 +33,19 @@ pub enum Cmd {
     DeleteAll,
     Fork {
         id: String,
+        /// Cut the branch at this message (its `messageID`). Absent — branch
+        /// the whole session.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    /// Revert (hide) the session tail starting at `message`.
+    Revert {
+        id: String,
+        message: String,
+    },
+    /// Restore a previously reverted tail.
+    Unrevert {
+        id: String,
     },
     Permission {
         session: String,

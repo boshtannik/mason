@@ -84,16 +84,57 @@ impl OpenCodeClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    /// POST /session/{id}/fork -> a new branch session (body `{messageID?}` optional).
-    pub async fn fork_session(&self, session_id: &str) -> Result<serde_json::Value, String> {
+    /// POST /session/{id}/fork -> a new branch session. With `message_id` the
+    /// branch is cut at that message (body `{messageID}`); without it the whole
+    /// session is branched.
+    pub async fn fork_session(
+        &self,
+        session_id: &str,
+        message_id: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
         let url = format!("{}/session/{session_id}/fork", self.base);
+        let body = match message_id {
+            Some(m) if !m.is_empty() => serde_json::json!({ "messageID": m }),
+            _ => serde_json::json!({}),
+        };
+        let resp = self
+            .authed(self.http.post(&url))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&text).map_err(|e| e.to_string())
+    }
+
+    /// POST /session/{id}/revert -> hide (revert) the tail starting at
+    /// `message_id`. Fails while the session is busy.
+    pub async fn revert_session(&self, session_id: &str, message_id: &str) -> Result<(), String> {
+        let url = format!("{}/session/{session_id}/revert", self.base);
+        let resp = self
+            .authed(self.http.post(&url))
+            .json(&serde_json::json!({ "messageID": message_id }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("revert status: {}", resp.status()));
+        }
+        Ok(())
+    }
+
+    /// POST /session/{id}/unrevert -> restore previously reverted messages.
+    pub async fn unrevert_session(&self, session_id: &str) -> Result<(), String> {
+        let url = format!("{}/session/{session_id}/unrevert", self.base);
         let resp = self
             .authed(self.http.post(&url))
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        let body = resp.text().await.map_err(|e| e.to_string())?;
-        serde_json::from_str(&body).map_err(|e| e.to_string())
+        if !resp.status().is_success() {
+            return Err(format!("unrevert status: {}", resp.status()));
+        }
+        Ok(())
     }
 
     /// POST /session/{id}/share -> session with a link in `share.url`.

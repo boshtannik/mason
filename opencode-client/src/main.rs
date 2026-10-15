@@ -18,6 +18,8 @@ use opencode_client::markers::*;
 use opencode_client::server;
 use opencode_client::settings::Settings;
 use opencode_client::types::event::PermissionReplyKind;
+use opencode_client::types::keys;
+use opencode_client::types::tool::ToolState;
 use opencode_client::voice;
 
 /// The only QML file of the application (located in /usr/share/harbour-opencode/qml).
@@ -387,6 +389,10 @@ async fn run_stream(
     let mut spoken_parts: std::collections::HashSet<String> = Default::default();
     // Periodically refresh sessions list (tick every 200ms; query roughly every 3s).
     let mut ticks: u32 = 0;
+    // Set when a prompt has just been sent; the next `message.updated` (role=user)
+    // of the current session yields the user messageID, which QML attaches to the
+    // fresh user bubble (so revert/fork work on just-sent messages too).
+    let mut expect_user_id: bool = false;
 
     // Show previously started sessions and available models immediately.
     refresh_sessions(&client, &sessions).await;
@@ -442,6 +448,8 @@ async fn run_stream(
                                 last_reasoning_push: &mut last_reasoning_push,
                                 text_live: &mut text_live,
                                 last_answer_push: &mut last_answer_push,
+                                current_session: current_session.as_deref(),
+                                expect_user_id: &mut expect_user_id,
                             };
                             let mut st = dispatcher.lock().await;
                             let _ = event::dispatcher::dispatch(&ev.payload, &mut st, &mut stream).await;
@@ -649,6 +657,10 @@ reasonings.clear();
                                     if let Ok(mut g) = todos.lock() {
                                         *g = "[]".to_string();
                                     }
+                                    // A fresh session is never reverted.
+                                    if let Ok(mut q) = worker_pending.lock() {
+                                        q.push(format!("{REVERTED_TAG}0"));
+                                    }
                                 }
                                 None => log::error!("new: session.id missing in response: {sess}"),
                             },
@@ -675,11 +687,11 @@ reasonings.clear();
                             set_current_session(&current_session_shared, &current_session);
                             refresh_todo(&client, id, &todos).await;
                         }
-                        Cmd::Fork { id } => {
+                        Cmd::Fork { id, message } => {
                             if id.is_empty() {
                                 continue;
                             }
-                            match client.fork_session(id).await {
+                            match client.fork_session(id, message.as_deref()).await {
                                 Ok(sess) => match sess["id"].as_str() {
                                     Some(new_id) => {
                                         log::info!("fork {id} -> {new_id}");
@@ -703,6 +715,59 @@ reasonings.clear();
                                     None => log::error!("fork: id missing in response: {sess}"),
                                 },
                                 Err(e) => log::error!("fork_session: {e}"),
+                            }
+                        }
+                        Cmd::Revert { id, message } => {
+                            if id.is_empty() || message.is_empty() {
+                                continue;
+                            }
+                            if current_session.as_deref() != Some(id.as_str()) {
+                                log::warn!("revert for non-current session {id}, ignored");
+                                continue;
+                            }
+                            log::info!("revert {id} at {message}");
+                            match client.revert_session(id, message).await {
+                                Ok(()) => {
+                                    parts.clear();
+                                    assistant_messages.clear();
+                                    reasonings.clear();
+                                    reasoning_order.clear();
+                                    text_live.clear();
+                                    text_order.clear();
+                                    spoken_parts.clear();
+                                    last_answer_push = 0;
+                                    clear_tools(&dispatcher, &tools).await;
+                                    load_history(&client, id, &worker_pending).await;
+                                    set_status(&status, "idle");
+                                    refresh_todo(&client, id, &todos).await;
+                                }
+                                Err(e) => log::error!("revert_session: {e}"),
+                            }
+                        }
+                        Cmd::Unrevert { id } => {
+                            if id.is_empty() {
+                                continue;
+                            }
+                            if current_session.as_deref() != Some(id.as_str()) {
+                                log::warn!("unrevert for non-current session {id}, ignored");
+                                continue;
+                            }
+                            log::info!("unrevert {id}");
+                            match client.unrevert_session(id).await {
+                                Ok(()) => {
+                                    parts.clear();
+                                    assistant_messages.clear();
+                                    reasonings.clear();
+                                    reasoning_order.clear();
+                                    text_live.clear();
+                                    text_order.clear();
+                                    spoken_parts.clear();
+                                    last_answer_push = 0;
+                                    clear_tools(&dispatcher, &tools).await;
+                                    load_history(&client, id, &worker_pending).await;
+                                    set_status(&status, "idle");
+                                }
+                                Err(e) => log::error!("unrevert_session: {e}"),
                             }
                         }
                         #[cfg(debug_assertions)]
@@ -1084,7 +1149,7 @@ reasonings.clear();
                         // New user turn — previous turn's tools disappear from the feed.
                         {
                             let mut st = dispatcher.lock().await;
-                            st.tools.states.clear();
+                            st.tools.clear();
                         }
                         if let Err(e) = client.prompt_async(&sid, &prompt, session_agents.get(&sid).cloned()).await {
                             log::error!("prompt_async: {e}");
@@ -1093,6 +1158,10 @@ reasonings.clear();
                                 q.push(svc_line(now_ms(), i18n::K_PROMPT_ERROR, &[emsg]));
                             }
                             set_status(&status, "error");
+                        } else {
+                            // The user message will arrive via `message.updated`;
+                            // grab its id to let QML offer revert/fork on the bubble.
+                            expect_user_id = true;
                         }
                     }
                 }
@@ -1294,15 +1363,46 @@ async fn load_history(
     session_id: &str,
     pending: &Arc<std::sync::Mutex<Vec<String>>>,
 ) {
+    // Revert boundary: messages with `id >= revert.messageID` are hidden. The
+    // server does not flag them — it only records the boundary on the session
+    // (SessionRevert.cleanup deletes the tail later, on the next prompt), so the
+    // filter is ours. The presence of a boundary also drives the QML "Restore"
+    // banner (control line `[[reverted]]1`).
+    let revert_id = match client.get_session(session_id).await {
+        Ok(s) => s[keys::REVERT][keys::MESSAGE_ID].as_str().map(str::to_string),
+        Err(e) => {
+            log::warn!("get_session (revert state): {e}");
+            None
+        }
+    };
+    if let Ok(mut q) = pending.lock() {
+        q.push(format!(
+            "{REVERTED_TAG}{}",
+            if revert_id.is_some() { "1" } else { "0" }
+        ));
+    }
     match client.session_messages(session_id).await {
         Ok(v) => {
             let mut items: Vec<&serde_json::Value> =
                 v.as_array().map(|a| a.iter().collect()).unwrap_or_default();
-            items.sort_by_key(|e| e["info"]["time"]["created"].as_u64().unwrap_or(0));
+            items.sort_by_key(|e| {
+                e[keys::INFO][keys::TIME][keys::CREATED]
+                    .as_u64()
+                    .unwrap_or(0)
+            });
             let mut lines: Vec<String> = Vec::new();
             for e in items {
-                let role = e["info"]["role"].as_str().unwrap_or("");
-                let created = e["info"]["time"]["created"].as_u64().unwrap_or(0);
+                let id = e[keys::INFO][keys::ID].as_str().unwrap_or("");
+                // Hide the reverted tail (mirror SessionRevert.cleanup boundaries).
+                if let Some(r) = &revert_id {
+                    if !id.is_empty() && id.as_bytes() >= r.as_bytes() {
+                        continue;
+                    }
+                }
+                let role = e[keys::INFO][keys::ROLE].as_str().unwrap_or("");
+                let created = e[keys::INFO][keys::TIME][keys::CREATED]
+                    .as_u64()
+                    .unwrap_or(0);
                 let mut text = String::new();
                 // Collect model reasoning separately: they come as parts with
                 // `type:"reasoning"` and are shown in the feed as [[think]]
@@ -1310,20 +1410,44 @@ async fn load_history(
                 // would be lost after app restart.
                 let mut reasoning = String::new();
                 let mut reasoning_ts = created;
-                if let Some(parts) = e["parts"].as_array() {
+                // Inline tool calls (TUI-style): one feed line per callID, in
+                // part order, so history matches the live stream.
+                let mut tool_lines: Vec<String> = Vec::new();
+                if let Some(parts) = e[keys::PARTS].as_array() {
                     for p in parts {
-                        match p["type"].as_str() {
-                            Some("text") => {
-                                if let Some(t) = p["text"].as_str() {
+                        match p[keys::TYPE].as_str() {
+                            Some(keys::PART_TEXT) => {
+                                if let Some(t) = p[keys::TEXT].as_str() {
                                     text.push_str(t);
                                 }
                             }
-                            Some("reasoning") => {
-                                if let Some(t) = p["text"].as_str() {
+                            Some(keys::PART_REASONING) => {
+                                if let Some(t) = p[keys::TEXT].as_str() {
                                     if reasoning.is_empty() {
-                                        reasoning_ts = p["time"]["start"].as_u64().unwrap_or(created);
+                                        reasoning_ts = p[keys::TIME][keys::START]
+                                            .as_u64()
+                                            .unwrap_or(created);
                                     }
                                     reasoning.push_str(t);
+                                }
+                            }
+                            Some(keys::PART_TOOL) => {
+                                let call = p[keys::CALL_ID].as_str().unwrap_or("");
+                                let tool = p[keys::TOOL].as_str().unwrap_or("");
+                                match serde_json::from_value::<ToolState>(p[keys::STATE].clone()) {
+                                    Ok(st) if !call.is_empty() => tool_lines.push(proto_tool_line(
+                                        created,
+                                        call,
+                                        tool,
+                                        st.ui_status(),
+                                        &st.description(),
+                                    )),
+                                    Ok(_) => log::warn!(
+                                        "history: tool part without callID is not implemented (skipped)"
+                                    ),
+                                    Err(e) => log::warn!(
+                                        "history: tool part state is unparseable ({e}) — skipped"
+                                    ),
                                 }
                             }
                             other => log::warn!(
@@ -1332,11 +1456,12 @@ async fn load_history(
                         }
                     }
                 }
-                if text.trim().is_empty() {
+                if text.trim().is_empty() && tool_lines.is_empty() {
                     continue;
                 }
-                if role == "user" {
-                    lines.push(proto_line(created, &format!("{USER_PREFIX}{text}")));
+                if role == keys::ROLE_USER {
+                    // The messageID rides in the line so QML can offer revert/fork.
+                    lines.push(proto_user_line(created, id, &text));
                 } else {
                     if !reasoning.trim().is_empty() {
                         let body = format!("{THINK_TAG}{}", reasoning.trim_end());
@@ -1344,7 +1469,10 @@ async fn load_history(
                     }
                     // Answer = the text parts, exactly as opencode's TUI shows
                     // them (reasoning was already separated above by PART TYPE).
-                    lines.push(proto_line(created, &text));
+                    if !text.trim().is_empty() {
+                        lines.push(proto_line(created, &text));
+                    }
+                    lines.extend(tool_lines);
                 }
             }
             log::info!("история сессии {session_id}: {} строк", lines.len());
@@ -1473,7 +1601,7 @@ async fn clear_tools(
 ) {
     {
         let mut st = dispatcher.lock().await;
-        st.tools.states.clear();
+        st.tools.clear();
     }
     if let Ok(mut g) = tools.lock() {
         *g = "[]".to_string();
@@ -1486,16 +1614,18 @@ async fn refresh_tools_json(
     tools: &Arc<std::sync::Mutex<String>>,
 ) {
     let st = dispatcher.lock().await;
-    let states = &st.tools.states;
-    let arr: Vec<serde_json::Value> = states
+    let arr: Vec<serde_json::Value> = st
+        .tools
+        .order
         .iter()
-        .map(|(call_id, e)| {
-            serde_json::json!({
+        .filter_map(|call_id| {
+            let e = st.tools.states.get(call_id)?;
+            Some(serde_json::json!({
                 "id": call_id,
                 "name": e.name,
                 "status": e.state.ui_status(),
                 "text": e.state.description(),
-            })
+            }))
         })
         .collect();
     drop(st);

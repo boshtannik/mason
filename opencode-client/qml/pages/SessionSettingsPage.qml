@@ -297,7 +297,7 @@ Item {
             SectionHeader { text: qsTr("Misc") }
 
             TextSwitch {
-                text: qsTr("Show tools strip")
+                text: qsTr("Show tool calls")
                 checked: appWindow.showTools
                 onCheckedChanged: appWindow.showTools = checked
             }

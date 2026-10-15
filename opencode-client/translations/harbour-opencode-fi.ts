@@ -13,6 +13,26 @@
         <source>Agent prompt…</source>
         <translation>Agentin kehote…</translation>
     </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="640"/>
+        <source>Fork from here</source>
+        <translation>Haaroita tästä</translation>
+    </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="644"/>
+        <source>Revert to here</source>
+        <translation>Palauta tähän</translation>
+    </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="777"/>
+        <source>History reverted</source>
+        <translation>Historia palautettu</translation>
+    </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="789"/>
+        <source>Restore</source>
+        <translation>Palauta</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -268,8 +288,8 @@ pitkä painallus — poista</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="276"/>
-        <source>Show tools strip</source>
-        <translation>Näytä työkalurivi</translation>
+        <source>Show tool calls</source>
+        <translation>Näytä työkalukutsut</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="305"/>

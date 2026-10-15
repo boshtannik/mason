@@ -212,7 +212,7 @@ Item {
             top: header.bottom
             left: parent.left
             right: parent.right
-            bottom: inputPanel.top
+            bottom: revertStrip.top
         }
         model: appWindow.chatModel
         clip: true
@@ -359,8 +359,11 @@ Item {
             // hides/shows already rendered [[think]] lines at once, without
             // reopening the session (new ones are not accumulated when the setting is off —
             // poll() in the root QML filters them out).
-            visible: appWindow.showReasoning || !line.isThink
-            height: visible ? bubble.height + Theme.paddingSmall : 0
+            // Inline tool rows obey the "Show tool calls" switch the same way.
+            visible: (appWindow.showReasoning || !line.isThink)
+                     && (appWindow.showTools || !line.isTool)
+            height: visible ? (line.isTool ? toolRow.height + Theme.paddingSmall
+                                           : bubble.height + Theme.paddingSmall) : 0
 
             // Raw line from the worker: `[[t:<ms>]]>>> text` (user) or
             // `[[t:<ms>]]text` (agent); a live user line from `send()` — `[[t:<ms>]]>>> text`.
@@ -384,7 +387,22 @@ Item {
             // muted styling, no speak button, no auto-TTS (never an answer).
             property bool isSvc: appWindow.lineIs(appWindow.stripTs(line.raw),
                                                  appWindow.kSvcTag)
+            // Inline tool call (TUI-style): `[[tool]]<callID>\u001f<name>\u001f
+            // <status>\u001f<text>`. Rendered as a compact row, not a bubble.
+            property bool isTool: appWindow.lineIs(appWindow.stripTs(line.raw),
+                                                   appWindow.kToolTag)
             property bool isSystem: line.isError || line.isSvc
+            // Tool-row fields (empty for non-tool lines).
+            property string toolName: appWindow.toolField(line.raw, 1)
+            property string toolStatus: appWindow.toolField(line.raw, 2)
+            property string toolText: appWindow.toolField(line.raw, 3)
+            // Bold tool name + its argument, both HTML-escaped (RichText).
+            property string toolHtml: {
+                var h = "<b>" + chatPage.htmlEsc(line.toolName) + "</b>"
+                if (line.toolText !== "")
+                    h += " " + chatPage.htmlEsc(line.toolText)
+                return h
+            }
             property string body: {
                 var b = appWindow.stripTs(line.raw)
                 if (appWindow.lineIs(b, appWindow.kThinkTag))
@@ -395,6 +413,7 @@ Item {
                     b = b.substring(appWindow.kErrTag.length)
                 if (line.isSvc)
                     b = b.substring(appWindow.kSvcTag.length)
+                b = appWindow.stripMsgId(b)
                 b = b.replace(/^\n+/, "")
                 if (b.length > appWindow.kFeedBodyCap)
                     b = b.substring(0, appWindow.kFeedBodyCap) + "\n… [text truncated]"
@@ -403,11 +422,15 @@ Item {
             // The body split into display segments: prose, fenced-code blocks
             // and whole-line links — so copy buttons can sit next to each block.
             // `{code, link, text, url, lang}` (see chatPage.splitBody).
-            property var segments: chatPage.splitBody(line.body)
+            property var segments: line.isTool ? [] : chatPage.splitBody(line.body)
+            // Server messageID of this bubble (user lines only): enables the
+            // long-press revert/fork menu. Empty for agent/system bubbles.
+            property string msgId: appWindow.msgIdOf(line.raw)
             readonly property real maxW: chatList.width - 2 * Theme.horizontalPageMargin
 
             Rectangle {
                 id: bubble
+                visible: !line.isTool
                 radius: Theme.paddingMedium
                 color: line.isThink
                        ? Theme.rgba(Theme.primaryColor, 0.05)
@@ -618,7 +641,121 @@ Item {
                         color: Theme.secondaryColor
                     }
                 }
+
+                // Long-press a user bubble → revert/fork menu (mirror of the TUI).
+                // Disabled while the agent is busy: reverting needs an idle session.
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: line.isUser && line.msgId !== "" && !chatPage.busy
+                    onPressAndHold: userMenu.open(line)
+                }
             }
+
+            // Revert/fork actions for this user message. ContextMenu reparents
+            // itself to the delegate item when opened (Silica ContextMenu.open).
+            ContextMenu {
+                id: userMenu
+                MenuItem {
+                    text: qsTr("Fork from here")
+                    onClicked: appWindow.forkFrom(line.msgId)
+                }
+                MenuItem {
+                    text: qsTr("Revert to here")
+                    onClicked: appWindow.revertTo(line.msgId)
+                }
+            }
+
+            // Inline tool row (TUI-style): a status dot + bold tool name + its
+            // argument, wrapped with a hanging indent under the content (the
+            // label starts after the dot, so wrapped lines align with the text).
+            Item {
+                id: toolRow
+                visible: line.isTool
+                width: line.maxW
+                height: toolLbl.height
+                anchors.left: parent.left
+                anchors.leftMargin: Theme.horizontalPageMargin
+
+                Rectangle {
+                    id: toolDot
+                    width: Theme.paddingSmall
+                    height: width
+                    radius: width / 2
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.topMargin: Theme.paddingSmall
+                    color: line.toolStatus === appWindow.kStatusError
+                           ? Qt.rgba(0.85, 0.15, 0.15, 1)
+                           : (line.toolStatus === appWindow.kStatusCompleted
+                              ? Theme.secondaryColor
+                              : Theme.highlightColor)
+                }
+                Label {
+                    id: toolLbl
+                    anchors.left: toolDot.right
+                    anchors.leftMargin: Theme.paddingSmall
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    text: line.toolHtml
+                    textFormat: Text.RichText
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Theme.fontSizeSmall
+                    color: Theme.secondaryColor
+                }
+            }
+        }
+    }
+
+    // ── Revert banner ─────────────────────────────────────────────────────
+    // Shown while the session tail is reverted (worker control line
+    // `[[reverted]]1`). "Restore" calls unrevert and the full history reloads.
+    Item {
+        id: revertStrip
+        readonly property bool on: appWindow.reverted === true
+        visible: on
+        height: visible ? Theme.itemSizeSmall : 0
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: inputPanel.top
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.rgba(Theme.highlightColor, 0.15)
+        }
+
+        Label {
+            anchors {
+                left: parent.left
+                leftMargin: Theme.horizontalPageMargin
+                verticalCenter: parent.verticalCenter
+            }
+            text: qsTr("History reverted")
+            font.pixelSize: Theme.fontSizeExtraSmall
+            color: Theme.secondaryColor
+        }
+
+        Button {
+            anchors {
+                right: parent.right
+                rightMargin: Theme.horizontalPageMargin
+                verticalCenter: parent.verticalCenter
+            }
+            height: Theme.itemSizeExtraSmall
+            text: qsTr("Restore")
+            onClicked: appWindow.unrevertSession()
+        }
+
+        // Hairline separating the banner from the chat above.
+        Rectangle {
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+            }
+            height: 1
+            color: Theme.rgba(Theme.primaryColor, 0.15)
         }
     }
 

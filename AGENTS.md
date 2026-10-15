@@ -47,6 +47,17 @@ These are not suggestions — they are the owner's explicit preferences. Keep th
    `options`, …), typing it as `Value` is fine; a closed enum/object must be
    modelled as such.
 
+6. **No raw string literals in logic — name every key/discriminator/value.**
+   Never compare against, `match` on, or index a `serde_json::Value` by a bare
+   string literal (`v["type"] == "tool"`, `map["created"]`, …). A typo in a
+   literal is invisible to the compiler; a typo in a named constant is not.
+   Declare constants and reference them:
+   - server JSON field names / discriminator values: `opencode-client/src/types/keys.rs`;
+   - feed-protocol markers (`[[tool]]`, `[[think]]`, …): `opencode-client/src/markers.rs`
+     (mirrored as `k…` constants in the QML, e.g. `kToolTag`);
+   - enum-like value sets: `types/tool.rs` (`STATUS_*`, `LABEL_INPUT_KEYS`).
+   QML mirrors the Rust constants under the same names; keep both sides in sync.
+
 ## Build / test
 
 - Build the RPM (authoritative gate — the host cannot `cargo check` because the

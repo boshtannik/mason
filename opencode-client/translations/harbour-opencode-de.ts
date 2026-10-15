@@ -13,6 +13,26 @@
         <source>Agent prompt…</source>
         <translation>Agent-Prompt…</translation>
     </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="640"/>
+        <source>Fork from here</source>
+        <translation>Von hier abzweigen</translation>
+    </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="644"/>
+        <source>Revert to here</source>
+        <translation>Bis hierher zurücksetzen</translation>
+    </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="777"/>
+        <source>History reverted</source>
+        <translation>Verlauf zurückgesetzt</translation>
+    </message>
+    <message>
+        <location filename="../../qml/pages/ChatPage.qml" line="789"/>
+        <source>Restore</source>
+        <translation>Wiederherstellen</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -268,8 +288,8 @@ lang drücken — entfernen</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="276"/>
-        <source>Show tools strip</source>
-        <translation>Werkzeugleiste anzeigen</translation>
+        <source>Show tool calls</source>
+        <translation>Werkzeugaufrufe anzeigen</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="305"/>
