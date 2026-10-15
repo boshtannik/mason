@@ -1,0 +1,7 @@
+[package]
+name = "opencode-proto"
+version = "0.1.0"
+edition = "2021"
+description = "Pure worker<->QML chat-feed protocol markers for harbour-opencode (no SFOS/Qt deps, testable on the host)"
+
+[dependencies]

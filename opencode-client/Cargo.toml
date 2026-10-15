@@ -20,6 +20,7 @@ log = "0.4"
 env_logger = "0.11"
 
 voice-engine = { path = "../voice-engine" }
+opencode-proto = { path = "../opencode-proto" }
 
 qmetaobject = { path = "vendor/qmetaobject-sfos-rs/qmetaobject" }
 sailors = { path = "vendor/sailors" }

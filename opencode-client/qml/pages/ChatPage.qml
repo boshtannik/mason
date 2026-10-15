@@ -414,6 +414,7 @@ Item {
                 if (line.isSvc)
                     b = b.substring(appWindow.kSvcTag.length)
                 b = appWindow.stripMsgId(b)
+                b = appWindow.stripPartId(b)
                 b = b.replace(/^\n+/, "")
                 if (b.length > appWindow.kFeedBodyCap)
                     b = b.substring(0, appWindow.kFeedBodyCap) + "\n… [text truncated]"

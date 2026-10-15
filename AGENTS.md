@@ -58,11 +58,27 @@ These are not suggestions — they are the owner's explicit preferences. Keep th
    - enum-like value sets: `types/tool.rs` (`STATUS_*`, `LABEL_INPUT_KEYS`).
    QML mirrors the Rust constants under the same names; keep both sides in sync.
 
+7. **Fix only what is in our zone — leave model/server/upstream artifacts alone.**
+   Before patching a reported defect, classify its origin. If the cause is the
+   model or the opencode server (e.g. the model emits a stray `</think>` token
+   as a `text` part, or produces duplicate output) and the official TUI behaves
+   the same way on the same data, then it is **not our bug** and must **not** be
+   "fixed" in the client. Our client mirrors the reference behavior; diverging
+   from it to paper over upstream quirks is out of scope. Verify the reference
+   behavior first (see the TUI snapshot in `/tmp/octui`, e.g. `src_rows.ts`),
+   then either fix our side or explicitly decline. When declining, say so and
+   do not touch the code.
+
 ## Build / test
 
 - Build the RPM (authoritative gate — the host cannot `cargo check` because the
   build targets aarch64 via `.cargo/config.toml` and needs the cross toolchain):
   `sg docker -c "./mbuild.sh"`.
+- Test the dependency-free protocol crate on the host: `make test`
+  (`cargo test --manifest-path opencode-proto/Cargo.toml`).
+- Test the `opencode-client` library (links Qt/SFOS, so it needs the SDK
+  cross toolchain + qemu): `make test-sdk` (`sg docker -c
+  "./scripts/test-sdk.sh"`). The host cannot run it.
 - The bundled `opencode` CLI version/hash are pinned in `mbuild.sh`
   (`OC_VERSION`, `OC_SHA256`); bump both together and re-verify `serve` on the
   phone.

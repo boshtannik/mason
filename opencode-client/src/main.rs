@@ -465,12 +465,17 @@ async fn run_stream(
                                 // deltas with the exact final text — the same way a
                                 // finished reasoning block replaces its [[thinklive]]
                                 // bubble below. Without this the live bubble could
-                                // keep a slightly stale/throttled tail.
+                                // keep a slightly stale/throttled tail. The part-id
+                                // rides along so QML edits the SAME bubble even if a
+                                // tool row landed in between.
                                 if was_live && !text.trim().is_empty() {
                                     if let Ok(mut q) = worker_pending.lock() {
-                                        let body =
-                                            format!("{ANSWER_LIVE_TAG}{}", text.trim_end());
-                                        q.push(proto_line(now_ms(), &body));
+                                        q.push(proto_live_line(
+                                            now_ms(),
+                                            ANSWER_LIVE_TAG,
+                                            text.trim_end(),
+                                            id,
+                                        ));
                                     }
                                     // Auto-TTS: the bubble is final — speak it NOW,
                                     // no waiting for idle (a long turn with tool
@@ -515,9 +520,12 @@ async fn run_stream(
                                 }
                                 if live_reasoned_ids.contains(id) && !text.trim().is_empty() {
                                     if let Ok(mut q) = worker_pending.lock() {
-                                        let body =
-                                            format!("{THINK_LIVE_TAG}{}", text.trim_end());
-                                        q.push(proto_line(now_ms(), &body));
+                                        q.push(proto_live_line(
+                                            now_ms(),
+                                            THINK_LIVE_TAG,
+                                            text.trim_end(),
+                                            id,
+                                        ));
                                     }
                                 }
                             }

@@ -108,6 +108,12 @@ ApplicationWindow {
     readonly property string kMsgIdOpen: "[[m:"
     readonly property string kSetMsgIdTag: "[[msgid]]"
     readonly property string kRevertedTag: "[[reverted]]"
+    // Live-line part-id marker (mirror of markers.rs PART_ID_OPEN): a live
+    // answer/reasoning line ends with `[[p:<partID>]]`. QML edits the bubble
+    // carrying that id in place — wherever it sits in the feed (see
+    // `partIdOf`/`liveIndexOf`), so an interleaved tool row can no longer
+    // duplicate the final answer.
+    readonly property string kPartIdOpen: "[[p:"
     // Inline tool call (mirror of markers.rs): one feed line per tool call,
     // `[[tool]]<callID>\u001f<name>\u001f<status>\u001f<text>`, replaced in
     // place as the call moves running → completed/error (TUI-style).
@@ -184,6 +190,44 @@ ApplicationWindow {
             return ""
         var parts = b.substring(app.kToolTag.length).split(app.kArgSep)
         return parts[idx] !== undefined ? parts[idx] : ""
+    }
+    // Part-id of a live answer/reasoning line (`…[[p:<id>]]`), or "".
+    function partIdOf(line) {
+        if (line === undefined || line === null)
+            return ""
+        var i = line.indexOf(app.kPartIdOpen)
+        if (i < 0)
+            return ""
+        var j = line.indexOf(app.kTagClose, i + app.kPartIdOpen.length)
+        if (j < 0)
+            return ""
+        return line.substring(i + app.kPartIdOpen.length, j)
+    }
+    // Display body without the trailing part-id marker.
+    function stripPartId(b) {
+        if (b === undefined || b === null)
+            return ""
+        var i = b.indexOf(app.kPartIdOpen)
+        if (i < 0)
+            return b
+        var j = b.indexOf(app.kTagClose, i + app.kPartIdOpen.length)
+        if (j < 0)
+            return b
+        return b.substring(0, i) + b.substring(j + app.kTagClose.length)
+    }
+    // Index of the feed line whose part-id equals `partId` (tail-first), or -1.
+    // `partId === ""` never matches (id-less lines are history/plain, not live).
+    // The live merge edits the bubble with this id IN PLACE — wherever it sits —
+    // so a tool row landing between deltas and the text-end re-push can no
+    // longer duplicate the final answer (the old positional heuristic did).
+    function liveIndexOf(acc, partId) {
+        if (partId === "" || acc === undefined || acc === null)
+            return -1
+        for (var i = acc.length - 1; i >= 0; i--) {
+            if (app.partIdOf(acc[i]) === partId)
+                return i
+        }
+        return -1
     }
     // Millisecond ts from `[[t:<ms>]]`, or current time if missing.
     function msOf(line) {
@@ -567,28 +611,22 @@ ApplicationWindow {
 
                     // Live model reasoning ([[thinklive]]): the worker streams
                     // deltas of `type:"reasoning"` parts while the model thinks.
-                    // Replace the trailing [[think]] bubble in place (or start a
-                    // new one) so the text grows live instead of stacking a
-                    // bubble per chunk — same as opencode's TUI.
+                    // The line carries the part-id (`[[p:<id>]]`); we edit the
+                    // bubble with that id IN PLACE — wherever it sits — so the text
+                    // grows live instead of stacking a bubble per chunk, and a new
+                    // block (think → tool → think) gets a fresh bubble (new id).
                     if (app.lineIs(bodyTmp, app.kThinkLiveTag)) {
                         if (!app.showReasoning)
                             continue
-                        var rText = bodyTmp.substring(app.kThinkLiveTag.length)
+                        var rPart = app.partIdOf(bodyTmp)
+                        var rText = app.stripPartId(bodyTmp.substring(app.kThinkLiveTag.length))
                         var rLine = app.kTsOpen + app.msOf(line) + app.kTsClose
                                     + app.kThinkTag + rText
-                        // Replace the trailing think bubble ONLY when the incoming
-                        // text continues the SAME reasoning block: within a block
-                        // the worker always pushes the full accumulated text, so it
-                        // starts with what is already shown. When a NEW block starts
-                        // (think → tool → think) the text does not continue the
-                        // previous one — a fresh bubble is appended, and the finished
-                        // block stays in the feed. This also protects finalized
-                        // (static) [[think]] bubbles from history.
-                        var prevBody = acc.length > 0 ? app.stripTs(acc[acc.length - 1]) : ""
-                        var prevText = app.lineIs(prevBody, app.kThinkTag)
-                                       ? prevBody.substring(app.kThinkTag.length) : null
-                        if (prevText !== null && rText.indexOf(prevText) === 0) {
-                            acc[acc.length - 1] = rLine
+                        if (rPart !== "")
+                            rLine += app.kPartIdOpen + rPart + app.kTagClose
+                        var rIdx = app.liveIndexOf(acc, rPart)
+                        if (rIdx >= 0) {
+                            acc[rIdx] = rLine
                             accMutated = true
                         } else {
                             acc = acc.concat(rLine)
@@ -597,25 +635,21 @@ ApplicationWindow {
                     }
 
                     // Live answer ([[answerlive]]): the worker streams deltas of
-                    // every answer text part while the model types. Grows/replaces
-                    // the trailing answer bubble in place so the answer is visible
-                    // live instead of appearing all at once on idle.
+                    // every answer text part while the model types. The line carries
+                    // the part-id (`[[p:<id>]]`); we edit the bubble with that id IN
+                    // PLACE — wherever it sits in the feed — so the answer grows live
+                    // and the text-end re-push lands in the SAME bubble even if a
+                    // tool row was appended in between (the old position-based
+                    // replacement duplicated the answer in that case).
                     if (app.lineIs(bodyTmp, app.kAnswerLiveTag)) {
-                        var aText = bodyTmp.substring(app.kAnswerLiveTag.length)
+                        var aPart = app.partIdOf(bodyTmp)
+                        var aText = app.stripPartId(bodyTmp.substring(app.kAnswerLiveTag.length))
                         var aLine = app.kTsOpen + app.msOf(line) + app.kTsClose + aText
-                        var aPrevBody = acc.length > 0 ? app.stripTs(acc[acc.length - 1]) : null
-                        var aPrevAns = aPrevBody === null ? null
-                                       : (app.lineIs(aPrevBody, app.kAnswerLiveTag)
-                                          ? aPrevBody.substring(app.kAnswerLiveTag.length)
-                                          : aPrevBody)
-                        if (aPrevAns !== null
-                            && !app.lineIs(aPrevBody, app.kUserPrefix)
-                            && !app.lineIs(aPrevBody, app.kSvcOpen)
-                            && !app.lineIs(aPrevBody, app.kErrOpen)
-                            && !app.lineIs(aPrevBody, app.kThinkTag)
-                            && (aText.indexOf(aPrevAns) === 0
-                                || aPrevAns.indexOf(aText) === 0)) {
-                            acc[acc.length - 1] = aLine
+                        if (aPart !== "")
+                            aLine += app.kPartIdOpen + aPart + app.kTagClose
+                        var aIdx = app.liveIndexOf(acc, aPart)
+                        if (aIdx >= 0) {
+                            acc[aIdx] = aLine
                             accMutated = true
                         } else {
                             acc = acc.concat(aLine)
@@ -1605,7 +1639,7 @@ ApplicationWindow {
                 var arr = app.messages
                 for (var i = arr.length - 1; i >= 0; i--) {
                     var raw = "" + arr[i]
-                    var body = app.stripTs(raw)
+                    var body = app.stripPartId(app.stripTs(raw))
                     if (raw === "" || body === "")
                         continue
                     if (app.lineIs(body, app.kUserPrefix)) continue

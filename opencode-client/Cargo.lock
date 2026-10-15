@@ -1089,6 +1089,7 @@ dependencies = [
  "futures-util",
  "hound",
  "log",
+ "opencode-proto",
  "qmetaobject",
  "reqwest",
  "sailors",
@@ -1098,6 +1099,10 @@ dependencies = [
  "tokio",
  "voice-engine",
 ]
+
+[[package]]
+name = "opencode-proto"
+version = "0.1.0"
 
 [[package]]
 name = "percent-encoding"

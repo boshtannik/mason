@@ -4,7 +4,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::i18n::{err_line, now_ms};
-use crate::markers::{proto_line, proto_tool_line, ANSWER_LIVE_TAG, SET_MSG_ID_TAG, THINK_LIVE_TAG};
+use crate::markers::{
+    proto_live_line, proto_tool_line, ANSWER_LIVE_TAG, SET_MSG_ID_TAG, THINK_LIVE_TAG,
+};
 use crate::state::permission::PermissionQueue;
 use crate::state::question::QuestionQueue;
 use crate::state::session::SessionFsm;
@@ -365,8 +367,7 @@ fn on_message_part_delta(stream: &mut StreamState<'_>, props: &MessagePartDeltaP
         *stream.last_reasoning_push = now;
         stream.live_reasoned_ids.insert(id.clone());
         if let Ok(mut q) = stream.pending.lock() {
-            let body = format!("{THINK_LIVE_TAG}{}", entry.trim_end());
-            q.push(proto_line(now, &body));
+            q.push(proto_live_line(now, THINK_LIVE_TAG, entry.trim_end(), id));
         }
     } else {
         let entry = stream.text_live.entry(id.clone()).or_default();
@@ -380,8 +381,7 @@ fn on_message_part_delta(stream: &mut StreamState<'_>, props: &MessagePartDeltaP
         }
         *stream.last_answer_push = now;
         if let Ok(mut q) = stream.pending.lock() {
-            let body = format!("{ANSWER_LIVE_TAG}{}", entry.trim_end());
-            q.push(proto_line(now, &body));
+            q.push(proto_live_line(now, ANSWER_LIVE_TAG, entry.trim_end(), id));
         }
     }
 }
@@ -600,3 +600,83 @@ pub struct DispatcherState {
 }
 
 pub type SharedState = Arc<Mutex<DispatcherState>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Build a `StreamState` over fresh test accumulators, run `f`, and return
+    /// the lines pushed to QML. `assistant` is the set of assistant message ids
+    /// (a delta of an unknown message is ignored); `reasoning_ids` marks parts
+    /// already confirmed as `type:"reasoning"`.
+    fn pushed(
+        assistant: &[&str],
+        reasoning_ids: &[&str],
+        props: &MessagePartDeltaProperties,
+    ) -> Vec<String> {
+        let pending = Mutex::new(Vec::new());
+        let status = Mutex::new(String::new());
+        let mut assistant_messages: HashSet<String> =
+            assistant.iter().map(|s| s.to_string()).collect();
+        let mut reasonings = HashMap::new();
+        let reasoning_part_ids: HashSet<String> =
+            reasoning_ids.iter().map(|s| s.to_string()).collect();
+        let mut live_reasoned_ids = HashSet::new();
+        let mut last_reasoning_push = 0u64;
+        let mut text_live = HashMap::new();
+        let mut last_answer_push = 0u64;
+        let mut expect_user_id = false;
+        {
+            let mut stream = StreamState {
+                pending: &pending,
+                status: &status,
+                assistant_messages: &mut assistant_messages,
+                reasonings: &mut reasonings,
+                reasoning_part_ids: &reasoning_part_ids,
+                live_reasoned_ids: &mut live_reasoned_ids,
+                last_reasoning_push: &mut last_reasoning_push,
+                text_live: &mut text_live,
+                last_answer_push: &mut last_answer_push,
+                current_session: None,
+                expect_user_id: &mut expect_user_id,
+            };
+            on_message_part_delta(&mut stream, props);
+        }
+        pending.lock().map(|q| q.clone()).unwrap_or_default()
+    }
+
+    fn delta(message_id: &str, part_id: &str, text: &str) -> MessagePartDeltaProperties {
+        MessagePartDeltaProperties {
+            sessionID: "ses".to_string(),
+            messageID: message_id.to_string(),
+            partID: part_id.to_string(),
+            field: "text".to_string(),
+            delta: text.to_string(),
+        }
+    }
+
+    /// The live answer line MUST carry the part-id so QML can edit the exact
+    /// bubble in place, position-independently (the duplicate-bubble fix).
+    #[test]
+    fn answer_delta_line_carries_part_id() {
+        let out = pushed(&["msg1"], &[], &delta("msg1", "prt_1", "hello"));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].ends_with("[[answerlive]]hello[[p:prt_1]]"), "{}", out[0]);
+    }
+
+    /// Reasoning deltas route to the think-live tag, same part-id shape.
+    #[test]
+    fn reasoning_delta_line_carries_part_id() {
+        let out = pushed(&["msg1"], &["prt_r"], &delta("msg1", "prt_r", "why"));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].ends_with("[[thinklive]]why[[p:prt_r]]"), "{}", out[0]);
+    }
+
+    /// A delta of a non-assistant message is ignored (no line pushed).
+    #[test]
+    fn unknown_message_delta_is_ignored() {
+        let out = pushed(&[], &[], &delta("msgX", "prt_1", "hello"));
+        assert!(out.is_empty());
+    }
+}
