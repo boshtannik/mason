@@ -206,10 +206,49 @@ Item {
         anchors.top: parent.top
     }
 
+    // Compaction activity banner. While the shown session is compacted (manual
+    // "Compact" or auto on context overflow) the server pushes no UI events and
+    // `POST /summarize` blocks the worker for the whole operation (~20 s), so
+    // the screen would look frozen. A spinner + label appears the moment the
+    // worker flags it, and stays until `session.compacted` reloads the feed.
+    Rectangle {
+        id: compactionBanner
+        anchors {
+            top: header.bottom
+            left: parent.left
+            right: parent.right
+        }
+        height: visible ? Theme.itemSizeSmall : 0
+        visible: chatPage.appWindow ? chatPage.appWindow.compactionActive : false
+        color: Theme.rgba(Theme.highlightBackgroundColor, 0.9)
+        z: 5
+
+        BusyIndicator {
+            id: compactionSpinner
+            size: BusyIndicatorSize.Small
+            running: compactionBanner.visible
+            anchors {
+                left: parent.left
+                leftMargin: Theme.horizontalPageMargin
+                verticalCenter: parent.verticalCenter
+            }
+        }
+        Label {
+            text: chatPage.appWindow.kCompactingNotice
+            font.pixelSize: Theme.fontSizeSmall
+            color: Theme.primaryColor
+            anchors {
+                left: compactionSpinner.right
+                leftMargin: Theme.paddingLarge
+                verticalCenter: parent.verticalCenter
+            }
+        }
+    }
+
     SilicaListView {
         id: chatList
         anchors {
-            top: header.bottom
+            top: compactionBanner.bottom
             left: parent.left
             right: parent.right
             bottom: revertStrip.top

@@ -9,9 +9,9 @@
 //! (readonly constants `kTsOpen`, `kTsClose`, `kThinkTag`, `kUserPrefix`,
 //! `kSvcOpen`, `kErrOpen`, `kTagClose`, `kErrTag`, `kSttTag`, `kTtsTag`,
 //! `kTtsStopTag`, `kSttDoneTag`, `kArgSep`, `kMsgIdOpen`, `kSetMsgIdTag`,
-//! `kRevertedTag`, `kToolTag`, `kPartIdOpen`, plus helpers `stripTs`, `lineIs`,
-//! `partIdOf`, `stripPartId`, `liveIndexOf`). Keep both files in sync: only
-//! change a marker here and in the QML mirror.
+//! `kRevertedTag`, `kToolTag`, `kPartIdOpen`, `kClearFeedTag`, plus helpers
+//! `stripTs`, `lineIs`, `partIdOf`, `stripPartId`, `liveIndexOf`). Keep both
+//! files in sync: only change a marker here and in the QML mirror.
 
 /// Line timestamp opener: `[[t:<ms>]]`.
 pub const TS_OPEN: &str = "[[t:";
@@ -69,6 +69,11 @@ pub const TTS_TAG: &str = "[[tts]]";
 pub const TTS_STOP_TAG: &str = "[[ttsstop]]";
 /// Control: STT cycle finished (worker emits; QML stops the mic loader).
 pub const STT_DONE_TAG: &str = "[[sttdone]]";
+/// Control: drop the whole visible transcript (`[[clearfeed]]`). The worker
+/// emits it right before re-loading a session's history when the server
+/// reports the session was compacted, so QML replaces the feed instead of
+/// appending the reloaded history to the old one.
+pub const CLEAR_FEED_TAG: &str = "[[clearfeed]]";
 
 // i18n tokens (see `i18n.rs`): the worker cannot call QML `qsTr`, so instead
 // of building display text it emits a translation KEY plus placeholder args:

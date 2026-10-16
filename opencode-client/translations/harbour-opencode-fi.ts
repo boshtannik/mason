@@ -635,5 +635,13 @@ pitkä painallus — poista</translation>
         <source>Copied</source>
         <translation>Kopioitu</translation>
     </message>
+    <message>
+        <source>Compacting history…</source>
+        <translation>Tiivistetään historiaa…</translation>
+    </message>
+    <message>
+        <source>Context compacted</source>
+        <translation>Konteksti tiivistetty</translation>
+    </message>
 </context>
 </TS>

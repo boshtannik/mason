@@ -27,6 +27,9 @@ ApplicationWindow {
     // its scroll position. Replacing the whole array as the ListView model
     // (e.g. on every streamed delta) destroyed all delegates and jumped to top.
     property var messages: []
+    // True while the shown session is being compacted (server-driven; read
+    // from the bridge each poll). Drives the activity banner above the chat.
+    property bool compactionActive: false
     ListModel { id: chatModel }
     property alias chatModel: chatModel
     onMessagesChanged: app.syncModel(app.messages)
@@ -108,6 +111,11 @@ ApplicationWindow {
     readonly property string kMsgIdOpen: "[[m:"
     readonly property string kSetMsgIdTag: "[[msgid]]"
     readonly property string kRevertedTag: "[[reverted]]"
+    // Control line `[[clearfeed]]`: drop the whole visible transcript. The
+    // worker emits it just before re-loading a session's history after the
+    // server reported the session was compacted, so the reloaded history
+    // replaces the feed instead of being appended to it.
+    readonly property string kClearFeedTag: "[[clearfeed]]"
     // Live-line part-id marker (mirror of markers.rs PART_ID_OPEN): a live
     // answer/reasoning line ends with `[[p:<partID>]]`. QML edits the bubble
     // carrying that id in place — wherever it sits in the feed (see
@@ -133,6 +141,9 @@ ApplicationWindow {
     // never sends them). kErrTag — error (red), kSvcTag — service notice.
     readonly property string kErrTag: "[[e]]"
     readonly property string kSvcTag: "[[s]]"
+    // Compact banner label. qsTr is resolved HERE (context "harbour-opencode",
+    // where the translation lives); ChatPage only reads the ready string.
+    readonly property string kCompactingNotice: qsTr("Compacting history…")
     // Safety cap for a single feed bubble (display): a bloated single answer
     // must not wedge the main thread's rich-text layout on every feed rebuild.
     readonly property int kFeedBodyCap: 60000
@@ -552,6 +563,7 @@ ApplicationWindow {
         var st = bridge.status_text()
         if (st !== undefined && st !== "")
             app.statusText = st
+        app.compactionActive = bridge.compaction_active()
         if (app.statusBase(app.statusText) === "busy") {
             app.wasBusy = true
         } else if (app.wasBusy) {
@@ -721,6 +733,15 @@ ApplicationWindow {
                     if (app.lineIs(bodyTmp, app.kRevertedTag)) {
                         app.reverted =
                             bodyTmp.substring(app.kRevertedTag.length).replace(/\s+$/, "") === "1"
+                        continue
+                    }
+
+                    // Control line: drop the transcript (`[[clearfeed]]`). The
+                    // worker emits it before re-loading history after a
+                    // compaction, so the reloaded feed starts from scratch.
+                    if (app.lineIs(bodyTmp, app.kClearFeedTag)) {
+                        acc = []
+                        accMutated = true
                         continue
                     }
 
@@ -1114,7 +1135,13 @@ ApplicationWindow {
 
     function shareSession(id) { bridge.share_session(id) }
     function unshareSession(id) { bridge.unshare_session(id) }
-    function summarizeSession(id) { bridge.summarize_session(id) }
+    function summarizeSession(id) {
+        // Compaction runs in the background and only reports completion via
+        // `session.compacted`; switch to the chat so the live "Compacting…"
+        // notice and the resulting summary are visible.
+        bridge.summarize_session(id)
+        app.requestPage(2)
+    }
     function abortSession(id) { bridge.abort_session(id) }
     function setModel(id, provider, model) { bridge.set_model(id, provider, model) }
 

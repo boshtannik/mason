@@ -48,6 +48,13 @@ pub struct AppBridge {
     /// id of the current session (written by the worker, read by QML). Empty string — no session.
     #[allow(dead_code)]
     current_session_shared: Arc<Mutex<String>>,
+    /// True while a compaction of the shown session runs (written by the worker,
+    /// polled by QML to show the activity banner). `POST /summarize` blocks the
+    /// worker for the whole compaction (~20 s), so the only reliable progress
+    /// signal is this flag — set the instant the user asks, cleared on
+    /// `session.compacted`/idle.
+    #[allow(dead_code)]
+    compacting_shared: Arc<Mutex<bool>>,
     /// QML request to change the carousel page (`take_nav` takes and clears it; <0 — none).
     #[allow(dead_code)]
     nav_shared: Arc<Mutex<i32>>,
@@ -227,6 +234,11 @@ pub struct AppBridge {
     current_session_id: qt_method!(fn current_session_id(&self) -> QString {
         let v = self.current_session_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
+    }),
+    /// QML: true while the shown session is being compacted (polled by the
+    /// activity banner in ChatPage).
+    compaction_active: qt_method!(fn compaction_active(&self) -> bool {
+        self.compacting_shared.lock().map(|g| *g).unwrap_or(false)
     }),
     /// QML: TODO tasks of the current session as JSON (read-only).
     todo_json: qt_method!(fn todo_json(&self) -> QString {
@@ -518,6 +530,11 @@ impl AppBridge {
     /// Current session id handle for the worker.
     pub fn current_session_handle(&self) -> Arc<Mutex<String>> {
         self.current_session_shared.clone()
+    }
+
+    /// Compaction-in-progress flag handle for the worker.
+    pub fn compacting_handle(&self) -> Arc<Mutex<bool>> {
+        self.compacting_shared.clone()
     }
 
     /// Navigation request handle for the worker.

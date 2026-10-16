@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::i18n::{err_line, now_ms};
+use crate::i18n::{err_line, now_ms, svc_line};
 use crate::markers::{
     proto_live_line, proto_tool_line, ANSWER_LIVE_TAG, SET_MSG_ID_TAG, THINK_LIVE_TAG,
 };
@@ -63,6 +63,20 @@ pub struct StreamState<'a> {
     /// Session currently shown in the UI (only its user messages are tracked
     /// for revert/fork — a user message of another session is ignored).
     pub current_session: Option<&'a str>,
+    /// Set by `dispatch` when the server reports a session was compacted
+    /// (`session.compacted`): the caller must re-load that session's history.
+    /// The reload itself is HTTP IO and lives in the SSE loop — here we only
+    /// record the intent, keeping "what the event means" in one place.
+    pub compacted: &'a mut Option<String>,
+    /// Compaction part.id already announced with a "Compacting…" notice, so a
+    /// repeated `message.part.updated` for the same compaction does not stack
+    /// duplicate bubbles. Reset by the history reload on `session.compacted`.
+    pub compaction_seen: &'a mut Option<String>,
+    /// Shared "compaction in progress" flag (polled by QML for the activity
+    /// banner). Set when a compaction part shows up for the shown session
+    /// (covers AUTO-compaction), cleared when the session is compacted or goes
+    /// idle.
+    pub compacting: &'a std::sync::Mutex<bool>,
     /// Set when the worker has just sent a prompt and is waiting for the
     /// user-message id from `message.updated`; cleared once captured (see
     /// `on_message_updated`). Prevents attaching a replayed id to the wrong
@@ -89,6 +103,13 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
         Event::SessionIdle { properties } => {
             if let Some(fsm) = state.sessions.get_mut(&properties.sessionID) {
                 fsm.apply(crate::types::session::SessionStatus::Idle);
+            }
+            // Safety: a session that went idle is no longer compacting (covers
+            // an aborted/failed compaction that never emitted `session.compacted`).
+            if stream.current_session == Some(properties.sessionID.as_str()) {
+                if let Ok(mut g) = stream.compacting.lock() {
+                    *g = false;
+                }
             }
             true
         }
@@ -148,6 +169,27 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
                     ));
                 }
             }
+            // Compaction started: the server attaches a `type:"compaction"` part
+            // to a user message, then streams the summary as an assistant
+            // `summary:true` message, and finally reports `session.compacted`.
+            // Announce it ONCE per part so the chat shows that work is happening
+            // (the TUI renders a dedicated compaction row here). Driving this off
+            // the event — not the Compact button — means AUTO-compaction on
+            // context overflow is visible too. The `session.compacted` reload
+            // replaces the notice with the summary + marker.
+            if let crate::types::message::Part::Compaction { id, .. } = &properties.part {
+                if stream.current_session == Some(properties.sessionID.as_str()) {
+                    if let Ok(mut g) = stream.compacting.lock() {
+                        *g = true;
+                    }
+                    if stream.compaction_seen.as_deref() != Some(id.as_str()) {
+                        *stream.compaction_seen = Some(id.clone());
+                        if let Ok(mut q) = stream.pending.lock() {
+                            q.push(svc_line(now_ms(), crate::i18n::K_COMPACTING, &[]));
+                        }
+                    }
+                }
+            }
             true
         }
         Event::QuestionAsked { properties } => {
@@ -191,6 +233,18 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
         Event::SessionDeleted { properties } => {
             state.session_meta.remove(&properties.info.id);
             state.sessions.remove(&properties.info.id);
+            true
+        }
+        // Compaction finished: the transcript changed (old turns replaced by a
+        // summary). The caller re-loads the history — needs HTTP IO, so we only
+        // record which session here (see `StreamState::compacted`).
+        Event::SessionCompacted { properties } => {
+            *stream.compacted = Some(properties.sessionID.clone());
+            if stream.current_session == Some(properties.sessionID.as_str()) {
+                if let Ok(mut g) = stream.compacting.lock() {
+                    *g = false;
+                }
+            }
             true
         }
         // Streaming / error events. Their handling used to live inline in the
@@ -259,7 +313,6 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
         | Event::IntegrationUpdated { .. }
         | Event::IntegrationConnectionUpdated { .. }
         | Event::CatalogUpdated { .. }
-        | Event::SessionCompacted { .. }
         | Event::SessionDiff { .. }
         | Event::MessageRemoved { .. }
         | Event::MessagePartRemoved { .. }
@@ -330,9 +383,16 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
 /// created user bubble can offer revert/fork like the ones loaded from history.
 fn on_message_updated(stream: &mut StreamState<'_>, props: &MessageUpdatedProperties) {
     match &props.info {
-        Message::Assistant { id, .. } => {
+        // A `mode:"compaction"` assistant message is the SUMMARY of the
+        // compressed history. It streams its own text parts, but it is not a
+        // normal answer: routing it through the answer accumulator would make
+        // the summary grow as an ordinary bubble mid-turn. It is rendered from
+        // history after the `session.compacted` reload instead, right below the
+        // "Context compacted" marker.
+        Message::Assistant { id, mode, .. } if mode != "compaction" => {
             stream.assistant_messages.insert(id.clone());
         }
+        Message::Assistant { .. } => {}
         Message::User { id, sessionID, .. } => {
             if *stream.expect_user_id && stream.current_session == Some(sessionID.as_str()) {
                 *stream.expect_user_id = false;
@@ -627,6 +687,9 @@ mod tests {
         let mut text_live = HashMap::new();
         let mut last_answer_push = 0u64;
         let mut expect_user_id = false;
+        let mut compacted = None;
+        let mut compaction_seen = None;
+        let compacting = Mutex::new(false);
         {
             let mut stream = StreamState {
                 pending: &pending,
@@ -639,6 +702,9 @@ mod tests {
                 text_live: &mut text_live,
                 last_answer_push: &mut last_answer_push,
                 current_session: None,
+                compacted: &mut compacted,
+                compaction_seen: &mut compaction_seen,
+                compacting: &compacting,
                 expect_user_id: &mut expect_user_id,
             };
             on_message_part_delta(&mut stream, props);
@@ -678,5 +744,123 @@ mod tests {
     fn unknown_message_delta_is_ignored() {
         let out = pushed(&[], &[], &delta("msgX", "prt_1", "hello"));
         assert!(out.is_empty());
+    }
+
+    /// `session.compacted` records the session to reload, so the SSE loop can
+    /// rebuild the transcript (summary replaces the old turns) without the user
+    /// leaving and re-entering the chat.
+    #[tokio::test]
+    async fn session_compacted_records_the_session_to_reload() {
+        let pending = Mutex::new(Vec::new());
+        let status = Mutex::new(String::new());
+        let mut assistant_messages = HashSet::new();
+        let mut reasonings = HashMap::new();
+        let reasoning_part_ids = HashSet::new();
+        let mut live_reasoned_ids = HashSet::new();
+        let mut last_reasoning_push = 0u64;
+        let mut text_live = HashMap::new();
+        let mut last_answer_push = 0u64;
+        let mut expect_user_id = false;
+        let mut compacted = None;
+        let mut compaction_seen = None;
+        let compacting = Mutex::new(false);
+        {
+            let mut stream = StreamState {
+                pending: &pending,
+                status: &status,
+                assistant_messages: &mut assistant_messages,
+                reasonings: &mut reasonings,
+                reasoning_part_ids: &reasoning_part_ids,
+                live_reasoned_ids: &mut live_reasoned_ids,
+                last_reasoning_push: &mut last_reasoning_push,
+                text_live: &mut text_live,
+                last_answer_push: &mut last_answer_push,
+                current_session: None,
+                compacted: &mut compacted,
+                compaction_seen: &mut compaction_seen,
+                compacting: &compacting,
+                expect_user_id: &mut expect_user_id,
+            };
+            let event = Event::SessionCompacted {
+                properties: crate::types::event::SessionIdProperties {
+                    sessionID: "ses_compact".to_string(),
+                },
+            };
+            let mut state = DispatcherState::default();
+            assert!(dispatch(&event, &mut state, &mut stream).await);
+        }
+        assert_eq!(compacted.as_deref(), Some("ses_compact"));
+    }
+
+    /// A `type:"compaction"` part of the SHOWN session pushes a single
+    /// "Compacting…" notice; a repeat of the same part.id does not stack a
+    /// second bubble, and another session's compaction is ignored. This is what
+    /// makes AUTO-compaction (context overflow) visible, not just the button.
+    #[tokio::test]
+    async fn compaction_part_announces_once_for_the_shown_session() {
+        use crate::types::event::MessagePartUpdatedProperties;
+        use crate::types::message::Part;
+
+        let pending = Mutex::new(Vec::new());
+        let status = Mutex::new(String::new());
+        let mut assistant_messages = HashSet::new();
+        let mut reasonings = HashMap::new();
+        let reasoning_part_ids = HashSet::new();
+        let mut live_reasoned_ids = HashSet::new();
+        let mut last_reasoning_push = 0u64;
+        let mut text_live = HashMap::new();
+        let mut last_answer_push = 0u64;
+        let mut compacted = None;
+        let mut compaction_seen = None;
+        let mut expect_user_id = false;
+        let compacting = Mutex::new(false);
+        {
+            let mut stream = StreamState {
+                pending: &pending,
+                status: &status,
+                assistant_messages: &mut assistant_messages,
+                reasonings: &mut reasonings,
+                reasoning_part_ids: &reasoning_part_ids,
+                live_reasoned_ids: &mut live_reasoned_ids,
+                last_reasoning_push: &mut last_reasoning_push,
+                text_live: &mut text_live,
+                last_answer_push: &mut last_answer_push,
+                current_session: Some("ses1"),
+                compacted: &mut compacted,
+                compaction_seen: &mut compaction_seen,
+                compacting: &compacting,
+                expect_user_id: &mut expect_user_id,
+            };
+            let mut state = DispatcherState::default();
+            let part = |session: &str| Event::MessagePartUpdated {
+                properties: MessagePartUpdatedProperties {
+                    sessionID: session.to_string(),
+                    part: Part::Compaction {
+                        id: "prt_c1".to_string(),
+                        auto: true,
+                    },
+                    time: 0.0,
+                },
+            };
+            // Another session's compaction: no notice, flag stays down.
+            assert!(dispatch(&part("other"), &mut state, &mut stream).await);
+            assert!(!*compacting.lock().unwrap());
+            // Shown session, twice with the same part id: ONE notice.
+            assert!(dispatch(&part("ses1"), &mut state, &mut stream).await);
+            assert!(dispatch(&part("ses1"), &mut state, &mut stream).await);
+            // The banner flag is up while the compaction runs.
+            assert!(*compacting.lock().unwrap());
+            // `session.compacted` clears it (the reload replaces the feed).
+            let done = Event::SessionCompacted {
+                properties: crate::types::event::SessionIdProperties {
+                    sessionID: "ses1".to_string(),
+                },
+            };
+            assert!(dispatch(&done, &mut state, &mut stream).await);
+            assert!(!*compacting.lock().unwrap());
+        }
+        let q = pending.lock().unwrap();
+        assert_eq!(q.len(), 1, "expected exactly one notice, got {q:?}");
+        assert!(q[0].contains("[[s:Compacting history"), "{}", q[0]);
     }
 }

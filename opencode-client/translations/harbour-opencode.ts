@@ -660,5 +660,13 @@ long press — remove</source>
         <source>Copied</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Compacting history…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Context compacted</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 </TS>

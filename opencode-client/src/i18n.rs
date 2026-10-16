@@ -41,6 +41,8 @@ pub const K_AUTH_EMPTY: &str = "Enter the API key first";
 pub const K_AUTH_SAVE_FAILED: &str = "Failed to save the OpenCode API key: %1";
 pub const K_AUTH_SIGNED_IN: &str = "Signed in to OpenCode";
 pub const K_AUTH_SIGNIN_FAILED: &str = "OpenCode sign-in failed: %1";
+pub const K_COMPACTING: &str = "Compacting history…";
+pub const K_COMPACTED: &str = "Context compacted";
 
 /// Current time in unix milliseconds.
 pub fn now_ms() -> u64 {

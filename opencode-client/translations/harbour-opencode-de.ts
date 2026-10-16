@@ -635,5 +635,13 @@ lang drücken — entfernen</translation>
         <source>Copied</source>
         <translation>Kopiert</translation>
     </message>
+    <message>
+        <source>Compacting history…</source>
+        <translation>Verlauf wird komprimiert…</translation>
+    </message>
+    <message>
+        <source>Context compacted</source>
+        <translation>Kontext komprimiert</translation>
+    </message>
 </context>
 </TS>

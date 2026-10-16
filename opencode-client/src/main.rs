@@ -111,6 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sessions = bridge_pinned.borrow().sessions_handle();
     let commands = bridge_pinned.borrow().commands_handle();
     let current_session = bridge_pinned.borrow().current_session_handle();
+    let compacting = bridge_pinned.borrow().compacting_handle();
     let nav = bridge_pinned.borrow().nav_handle();
     if let Ok(mut n) = nav.lock() {
         *n = -1;
@@ -143,6 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_sessions = sessions.clone();
     let worker_commands = commands.clone();
     let worker_current = current_session.clone();
+    let worker_compacting = compacting.clone();
     let worker_nav = nav.clone();
     let worker_todos = todos.clone();
     let worker_models = models.clone();
@@ -192,6 +194,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_sessions,
                             worker_commands,
                             worker_current,
+                            worker_compacting,
                             worker_nav,
                             worker_todos,
                             worker_models,
@@ -252,6 +255,7 @@ async fn run_worker(
     sessions: Arc<std::sync::Mutex<String>>,
     commands: Arc<std::sync::Mutex<Vec<String>>>,
     current_session: Arc<std::sync::Mutex<String>>,
+    compacting: Arc<std::sync::Mutex<bool>>,
     nav: Arc<std::sync::Mutex<i32>>,
     todos: Arc<std::sync::Mutex<String>>,
     models: Arc<std::sync::Mutex<String>>,
@@ -280,6 +284,7 @@ async fn run_worker(
                 sessions.clone(),
                 commands.clone(),
                 current_session.clone(),
+                compacting.clone(),
                 nav.clone(),
                 todos.clone(),
                 models.clone(),
@@ -314,6 +319,7 @@ async fn run_stream(
     sessions: Arc<std::sync::Mutex<String>>,
     commands: Arc<std::sync::Mutex<Vec<String>>>,
     current_session_shared: Arc<std::sync::Mutex<String>>,
+    compacting: Arc<std::sync::Mutex<bool>>,
     nav: Arc<std::sync::Mutex<i32>>,
     todos: Arc<std::sync::Mutex<String>>,
     models: Arc<std::sync::Mutex<String>>,
@@ -393,6 +399,14 @@ async fn run_stream(
     // of the current session yields the user messageID, which QML attaches to the
     // fresh user bubble (so revert/fork work on just-sent messages too).
     let mut expect_user_id: bool = false;
+    // Session the server reported compacted (`session.compacted`). `dispatch`
+    // records it here; below, after the dispatch call, we reload that session's
+    // history so the summary replaces the old turns without re-entering the chat.
+    let mut compacted_session: Option<String> = None;
+    // Compaction part.id already announced with a "Compacting…" notice, so a
+    // repeat `message.part.updated` for the same compaction does not stack a
+    // second bubble (the dispatcher fills/reads this; see `StreamState`).
+    let mut compaction_seen: Option<String> = None;
 
     // Show previously started sessions and available models immediately.
     refresh_sessions(&client, &sessions).await;
@@ -449,10 +463,41 @@ async fn run_stream(
                                 text_live: &mut text_live,
                                 last_answer_push: &mut last_answer_push,
                                 current_session: current_session.as_deref(),
+                                compacted: &mut compacted_session,
+                                compaction_seen: &mut compaction_seen,
+                                compacting: &*compacting,
                                 expect_user_id: &mut expect_user_id,
                             };
                             let mut st = dispatcher.lock().await;
                             let _ = event::dispatcher::dispatch(&ev.payload, &mut st, &mut stream).await;
+                        }
+                        // The server compacted the shown session: reload its
+                        // history so the summary and the "Context compacted"
+                        // marker appear right away (previously the feed only
+                        // refreshed after leaving and re-entering the chat).
+                        if let Some(sid) = compacted_session.take() {
+                            if current_session.as_deref() == Some(sid.as_str()) {
+                                log::info!("session compacted: reloading history of {sid}");
+                                parts.clear();
+                                assistant_messages.clear();
+                                reasonings.clear();
+                                reasoning_order.clear();
+                                text_live.clear();
+                                text_order.clear();
+                                spoken_parts.clear();
+                                last_answer_push = 0;
+                                compaction_seen = None;
+                                if let Ok(mut g) = compacting.lock() {
+                                    *g = false;
+                                }
+                                clear_tools(&dispatcher, &tools).await;
+                                if let Ok(mut q) = worker_pending.lock() {
+                                    q.push(CLEAR_FEED_TAG.to_string());
+                                }
+                                load_history(&client, &sid, &worker_pending).await;
+                                refresh_sessions(&client, &sessions).await;
+                                refresh_todo(&client, &sid, &todos).await;
+                            }
                         }
                         if let Some((sid, mid, id, text)) = ev.payload.text_part() {
                             if assistant_messages.contains(mid) {
@@ -871,6 +916,15 @@ reasonings.clear();
                             if id.is_empty() {
                                 continue;
                             }
+                            // Show the "compacting" banner the instant the user
+                            // asks: the POST below blocks for the whole
+                            // compaction (~20 s) and returns only when it is
+                            // done, so no server event reaches the UI in time.
+                            if current_session.as_deref() == Some(id.as_str()) {
+                                if let Ok(mut g) = compacting.lock() {
+                                    *g = true;
+                                }
+                            }
                             match client.get_session(id).await {
                                 Ok(s) => {
                                     let provider = s["model"]["providerID"].as_str().unwrap_or("");
@@ -879,12 +933,28 @@ reasonings.clear();
                                         log::error!("summarize: у сессии нет модели: {s}");
                                     } else {
                                         match client.summarize_session(id, provider, model).await {
+                                            // The "Compacting…" notice is NOT
+                                            // pushed here: the server reports the
+                                            // compaction via a `type:"compaction"`
+                                            // part event, which the dispatcher
+                                            // turns into the notice (see the
+                                            // MessagePartUpdated branch). That
+                                            // same path covers AUTO-compaction on
+                                            // context overflow — the one the
+                                            // button-driven notice used to miss.
                                             Ok(()) => log::info!("summarize {id} ({provider}/{model})"),
                                             Err(e) => log::error!("summarize_session: {e}"),
                                         }
                                     }
                                 }
                                 Err(e) => log::error!("get_session: {e}"),
+                            }
+                            // The compaction POST has returned: it is finished.
+                            // The buffered `session.compacted` (processed right
+                            // after) also clears this, but do it here too so a
+                            // failed/duplicate path never leaves the banner on.
+                            if let Ok(mut g) = compacting.lock() {
+                                *g = false;
                             }
                         }
                         Cmd::Abort { id } => {
@@ -1421,6 +1491,10 @@ async fn load_history(
                 // Inline tool calls (TUI-style): one feed line per callID, in
                 // part order, so history matches the live stream.
                 let mut tool_lines: Vec<String> = Vec::new();
+                // Set when the message carries a `type:"compaction"` part (the
+                // opencode compaction marker): the message has no text, so the
+                // empty-message guard below must still keep its notice line.
+                let mut has_compaction = false;
                 if let Some(parts) = e[keys::PARTS].as_array() {
                     for p in parts {
                         match p[keys::TYPE].as_str() {
@@ -1458,18 +1532,33 @@ async fn load_history(
                                     ),
                                 }
                             }
+                            Some(keys::PART_COMPACTION) => {
+                                // Compaction marker: the model's summary of the
+                                // compressed history arrives as the following
+                                // `summary:true` assistant message; the user
+                                // message carrying this part only marks where the
+                                // compaction happened. Show it as a service
+                                // notice (mirrors the TUI's compaction row)
+                                // instead of silently dropping it.
+                                lines.push(svc_line(created, i18n::K_COMPACTED, &[]));
+                                has_compaction = true;
+                            }
                             other => log::warn!(
                                 "history: part type {other:?} is not implemented in the UI (skipped)"
                             ),
                         }
                     }
                 }
-                if text.trim().is_empty() && tool_lines.is_empty() {
+                if text.trim().is_empty() && tool_lines.is_empty() && !has_compaction {
                     continue;
                 }
                 if role == keys::ROLE_USER {
-                    // The messageID rides in the line so QML can offer revert/fork.
-                    lines.push(proto_user_line(created, id, &text));
+                    // A compaction-only user message has no body — the notice
+                    // line was already pushed above, so skip the empty bubble.
+                    if !text.trim().is_empty() {
+                        // The messageID rides in the line so QML can offer revert/fork.
+                        lines.push(proto_user_line(created, id, &text));
+                    }
                 } else {
                     if !reasoning.trim().is_empty() {
                         let body = format!("{THINK_TAG}{}", reasoning.trim_end());

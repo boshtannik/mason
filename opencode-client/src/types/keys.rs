@@ -25,6 +25,7 @@ pub const TYPE: &str = "type";
 pub const PART_TEXT: &str = "text";
 pub const PART_REASONING: &str = "reasoning";
 pub const PART_TOOL: &str = "tool";
+pub const PART_COMPACTION: &str = "compaction";
 
 // ---- Part fields ----
 pub const TEXT: &str = "text";

@@ -635,5 +635,13 @@ long press — remove</source>
         <source>Copied</source>
         <translation>Скопійовано</translation>
     </message>
+    <message>
+        <source>Compacting history…</source>
+        <translation>Стискаю історію…</translation>
+    </message>
+    <message>
+        <source>Context compacted</source>
+        <translation>Контекст стиснуто</translation>
+    </message>
 </context>
 </TS>

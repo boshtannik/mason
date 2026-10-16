@@ -95,3 +95,24 @@ ALFED append len=53 prev=[[tool]]call_b45f...   <-- дубль
 **Тесты (задел на будущее).** Логика протокола вынесена в отдельный крейт без зависимостей — `opencode-proto/` (`markers.rs` переехал туда, `opencode-client/src/markers.rs` — тонкий ре-экспорт), поэтому тесты гоняются на хосте обычным `cargo test`, без SFOS-тулчейна:
 - `opencode-proto/src/lib.rs` — формат строк (`proto_live_line` несёт `<partID>` в хвосте, `proto_user_line`, `proto_tool_line`), т.е. инвариант, на котором стоит фикс. Прогон: `make test`.
 - `opencode-client/src/event/dispatcher.rs` — `#[cfg(test)] mod tests`: живая дельта проходит путь `on_message_part_delta` и пушит строку с id парта (answer/think), а дельта не-assistant сообщения игнорируется. Крейт линкует SFOS/Qt, поэтому гоняется в SDK через sb2+qemu: `make test-sdk`.
+
+## Компакция сессии — нет обратной связи (2026-10-16)
+
+**Симптом (со слов пользователя):** нажал «Compact (compress history)» в настройках сессии — экран переключается на чат, и до появления готового баббла (выжимки) на экране ничего не происходит: непонятно, идёт работа или нет. Результат виден только если выйти и заново войти в чат.
+
+**Диагноз (по логам телефона + живой записи SSE + коду сервера):**
+- Классический HTTP-API сервера шлёт ТОЛЬКО: user-сообщение с партом `type:"compaction"`, затем assistant-сообщение `summary:true` (текст выжимки), и в конце `session.compacted`. Событий `session.next.compaction.started/delta/ended` НЕТ.
+- Замер: `POST /session/{id}/summarize` **блокирует ~20 с** и возвращает ответ только когда компакция уже завершена. Воркер (`run_stream`) ждёт этот POST прямо в ветке обработки команд `tokio::select!`, поэтому события SSE (compaction-парт, `session.compacted`) копятся в буфере и обрабатываются одним залпом уже ПОСЛЕ завершения. Плашка «Compacting…» ставится и тут же стирается `[[clearfeed]]`; QML (опрос раз в 300 мс) её вообще не успевает увидеть. Отсюда «ничего не происходит ~20 с».
+- `Cmd::Summarize` (`main.rs`) делал только POST + `log::info!` (логгер на `warn`, не виден): ни статуса, ни строки в ленте. Загрузчик истории молча пропускал парт `compaction`.
+
+**Фикс:**
+- **Флаг «идёт компакция» в bridge** (`compacting_shared: Arc<Mutex<bool>>`, `compaction_active()` для QML). Ставится **мгновенно** в `Cmd::Summarize` ДО блокирующего POST (для текущей сессии) и в диспетчере на событие compaction-парта (это же покрывает АВТО-компакцию при переполнении контекста). Сбрасывается на `session.compacted` и на `session.idle`.
+- **Плашка активности** над чатом (`ChatPage.qml`): `BusyIndicator` + локализованный текст «Compacting history…» / «Сжимаю историю…» (`kCompactingNotice` в `harbour-opencode.qml`, чтобы `qsTr` резолвился в нужном контексте перевода). Пока флаг поднят — плашка видна; список чата сдвигается вниз на её высоту.
+- **`session.compacted` → перезагрузка истории:** диспетчер вынесен из «ignored» в явную ветку — пишет id сессии в `StreamState::compacted` (IO остаётся в SSE-цикле). Цикл (`main.rs`) для текущей сессии сбрасывает стрим-аккумуляторы, шлёт control-строку `[[clearfeed]]` и перезагружает историю + сессии + todo. Так выжимка и маркер появляются сразу, без перезахода.
+- **Маркер в истории:** загрузчик рендерит парт `compaction` как сервис-строку `svc_line(created, K_COMPACTED)` («Context compacted» / «Контекст сжат»); пустое user-сообщение с этим партом больше не даёт пустой баббл.
+- **Протокол:** новый маркер `CLEAR_FEED_TAG = "[[clearfeed]]"` (`opencode-proto/src/lib.rs`, зеркало `kClearFeedTag` в QML) — QML по нему очищает ленту перед вставкой перезагруженной истории.
+- i18n: ключи `K_COMPACTING` / `K_COMPACTED` (`i18n.rs`) + во всех `.ts` (ru/uk/de/fi переведены).
+
+**Тесты:** `opencode-client/src/event/dispatcher.rs` — `#[tokio::test] session_compacted_records_the_session_to_reload` (диспетч `session.compacted` пишет id в `StreamState::compacted`) и `compaction_part_announces_once_for_the_shown_session` (одна плашка на парт; взвод флага на текущую сессию, игнор чужой; сброс на `session.compacted`). Прогон: `make test` (proto, хостер) + `make test-sdk` (5 lib-тестов, зелёные).
+
+**Проверено вживую:** пользователь подтвердил плашку при ручном «Compact» (после релизной сборки).
