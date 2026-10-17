@@ -189,6 +189,9 @@ Item {
                 return
             var cur = input.text
             input.text = (cur.length > 0 ? cur + " " : "") + text
+            // Setting `text` resets the caret to 0; put it at the end so the
+            // next dictation/send continues from where the user left off.
+            input.cursorPosition = input.text.length
             input.focus = true
         }
         // Cover action "pen" (text-only mode): focus the prompt input and
@@ -401,8 +404,16 @@ Item {
             // Inline tool rows obey the "Show tool calls" switch the same way.
             visible: (appWindow.showReasoning || !line.isThink)
                      && (appWindow.showTools || !line.isTool)
-            height: visible ? (line.isTool ? toolRow.height + Theme.paddingSmall
-                                           : bubble.height + Theme.paddingSmall) : 0
+            // The long-press menu is pinned to the item's bottom; Silica clips
+            // it to the item's height (layer sourceRect, see private/ViewItem.qml).
+            // Grow the item by the menu height while it is open so every menu
+            // entry fits (without this only the first entry was visible on
+            // short bubbles).
+            property bool menuOpen: userMenu._open
+            height: visible ? (line.isTool
+                               ? toolRow.height + Theme.paddingSmall
+                               : bubble.height + Theme.paddingSmall
+                                 + (line.menuOpen ? userMenu.height : 0)) : 0
 
             // Raw line from the worker: `[[t:<ms>]]>>> text` (user) or
             // `[[t:<ms>]]text` (agent); a live user line from `send()` — `[[t:<ms>]]>>> text`.
@@ -628,10 +639,11 @@ Item {
                     y: bodyCol.y + bodyCol.height + Theme.paddingSmall
                     spacing: Theme.paddingMedium
 
-                    // 📋 copy the whole answer (or thinking) to the clipboard.
+                    // 📋 copy this bubble to the clipboard — the agent's answer
+                    // (or thinking) and the user's own messages alike.
                     IconButton {
                         id: copyBtn
-                        visible: !line.isUser && !line.isSystem
+                        visible: !line.isSystem
                         width: visible ? Theme.itemSizeMedium : 0
                         height: visible ? Theme.itemSizeMedium : 0
                         icon.source: "image://theme/icon-m-clipboard"
@@ -682,7 +694,7 @@ Item {
                     }
                 }
 
-                // Long-press a user bubble → revert/fork menu (mirror of the TUI).
+                // Long-press a user bubble → edit/fork menu (mirror of the TUI).
                 // Disabled while the agent is busy: reverting needs an idle session.
                 MouseArea {
                     anchors.fill: parent
@@ -696,12 +708,19 @@ Item {
             ContextMenu {
                 id: userMenu
                 MenuItem {
-                    text: qsTr("Fork from here")
-                    onClicked: appWindow.forkFrom(line.msgId)
+                    // TUI parity: revert to this message AND put its text back
+                    // into the prompt field, so it can be edited and re-sent.
+                    text: qsTr("Edit")
+                    onClicked: {
+                        input.text = line.body
+                        input.cursorPosition = input.text.length
+                        input.forceActiveFocus()
+                        appWindow.revertTo(line.msgId)
+                    }
                 }
                 MenuItem {
-                    text: qsTr("Revert to here")
-                    onClicked: appWindow.revertTo(line.msgId)
+                    text: qsTr("Fork")
+                    onClicked: appWindow.forkFrom(line.msgId)
                 }
             }
 
@@ -932,8 +951,11 @@ Item {
                           ? "" : "image://theme/icon-m-mic"
 
             // A loader instead of the icon while recording or recognising.
+            // Centered exactly on the button (same as the mic icon it replaces);
+            // `anchors.fill` used to offset it away from the icon's spot.
             BusyIndicator {
-                anchors.fill: parent
+                anchors.centerIn: parent
+                size: BusyIndicatorSize.Medium
                 running: appWindow.recording || appWindow.recognizing
                 visible: running
             }

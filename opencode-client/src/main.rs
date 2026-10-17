@@ -1229,6 +1229,14 @@ reasonings.clear();
                             let mut st = dispatcher.lock().await;
                             st.tools.clear();
                         }
+                        // A new prompt drops the reverted tail server-side
+                        // (SessionRevert.cleanup), so the "History reverted"
+                        // banner no longer applies — clear it here so EVERY send
+                        // path is covered (text input AND voice/PTT), not just
+                        // QML `send()`. This is the "clear on new history" hook.
+                        if let Ok(mut q) = worker_pending.lock() {
+                            q.push(format!("{REVERTED_TAG}0"));
+                        }
                         if let Err(e) = client.prompt_async(&sid, &prompt, session_agents.get(&sid).cloned()).await {
                             log::error!("prompt_async: {e}");
                             let emsg = e.to_string();

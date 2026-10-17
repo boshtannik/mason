@@ -15,13 +15,13 @@
     </message>
     <message>
         <location filename="../../qml/pages/ChatPage.qml" line="640"/>
-        <source>Fork from here</source>
-        <translation>Ответвить отсюда</translation>
+        <source>Fork</source>
+        <translation>Форк</translation>
     </message>
     <message>
-        <location filename="../../qml/pages/ChatPage.qml" line="644"/>
-        <source>Revert to here</source>
-        <translation>Откатить сюда</translation>
+        <location filename="../../qml/pages/ChatPage.qml" line="712"/>
+        <source>Edit</source>
+        <translation>Редактировать</translation>
     </message>
     <message>
         <location filename="../../qml/pages/ChatPage.qml" line="777"/>
