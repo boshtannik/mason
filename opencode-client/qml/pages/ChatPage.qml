@@ -609,18 +609,28 @@ Item {
                                         onClicked: appWindow.copyText(segItem.seg.text)
                                     }
                                 }
-                                Label {
-                                    id: codeLbl
+                                SilicaFlickable {
+                                    id: codeFlick
                                     anchors.left: parent.left
                                     anchors.right: parent.right
-                                    anchors.leftMargin: Theme.paddingSmall
-                                    anchors.rightMargin: Theme.paddingSmall
                                     anchors.top: codeHeader.bottom
-                                    text: chatPage.mdCode(segItem.seg.text)
-                                    textFormat: Text.RichText
-                                    wrapMode: Text.Wrap
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    color: Theme.primaryColor
+                                    height: Math.max(Theme.itemSizeMedium,
+                                                     codeLbl.paintedHeight + 2 * Theme.paddingSmall)
+                                    contentWidth: codeLbl.paintedWidth + 2 * Theme.paddingSmall
+                                    contentHeight: height
+                                    clip: true
+                                    flickableDirection: Flickable.HorizontalFlick
+                                    Label {
+                                        id: codeLbl
+                                        x: Theme.paddingSmall
+                                        y: Theme.paddingSmall
+                                        text: chatPage.mdCode(segItem.seg.text)
+                                        textFormat: Text.RichText
+                                        wrapMode: Text.NoWrap
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        color: Theme.primaryColor
+                                    }
+                                    HorizontalScrollDecorator {}
                                 }
                             }
                         }
