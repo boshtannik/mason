@@ -66,7 +66,7 @@ docker run --rm \
   mkdir -p third_party
   ln -sfn "$HOME/cargo-cache/whisper.cpp" third_party/whisper.cpp
   # Patch for whisper-cli: adds the CLI option --audio-ctx (FUTO approach to speed).
-  if ! grep -qF -- '--audio-ctx' third_party/whisper.cpp/examples/main/main.cpp; then
+  if ! grep -qF -- "--audio-ctx" third_party/whisper.cpp/examples/main/main.cpp; then
     patch -p1 -d third_party/whisper.cpp < /src/packaging/whisper-cli-audio-ctx.patch
     echo "whisper-cli: патч --audio-ctx применён"
   else
@@ -78,7 +78,8 @@ docker run --rm \
   # and NEEDED libs are unchanged, do not reintroduce it).
   ls -d third_party/whisper.cpp
   # Piper (TTS): a ready-made static aarch64 build (reference) — we unpack it
-  # into the cache, then the spec installs it into /usr/libexec/harbour-opencode/piper/.
+  # into the cache, then the spec installs it into %{payloaddir}/piper
+  # (/home/harbour-opencode/piper, symlinked from /usr/libexec/harbour-opencode).
   if [ ! -e "$HOME/cargo-cache/piper-aarch64/piper/piper" ]; then
     curl -fsSL -o /tmp/piper-aarch64.tar.gz \
       "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_aarch64.tar.gz"
@@ -88,7 +89,8 @@ docker run --rm \
   fi
   find "$HOME/cargo-cache/piper-aarch64" -maxdepth 2 -name piper -type f
   ls -l "$HOME/cargo-cache/piper-aarch64/piper"
-  # opencode CLI: we bundle the arm64 binary into the RPM (/usr/libexec/harbour-opencode/opencode)
+  # opencode CLI: we bundle the arm64 binary into the RPM (/home/harbour-opencode/opencode,
+  # symlinked from /usr/libexec/harbour-opencode/opencode)
   # so the client does not depend on a separately installed opencode or conflict with it via PATH.
   # Version 1.19.0 ships a native arm64 build again (1.18.31/1.18.32 were Bun builds: `--version`
   # without args printed 1.3.14 (Bun) and `serve` failed with "Script not found serve").
@@ -112,7 +114,7 @@ docker run --rm \
     rm -rf "$OC_CLI"
     mkdir -p "$OC_CLI"
     tar -xzf /tmp/opencode-linux-arm64.tar.gz -C "$OC_CLI"
-    printf '%s\n' "$OC_VERSION" > "$OC_CLI/opencode.version"
+    printf "%s\n" "$OC_VERSION" > "$OC_CLI/opencode.version"
   fi
   echo "opencode CLI version: $(cat "$OC_CLI/opencode.version")"
   OC_SHA_NOW=$(sha256sum "$OC_CLI/opencode")
@@ -128,12 +130,12 @@ docker run --rm \
   OC_RPM="$(pwd)/$(ls RPMS/*.rpm | head -1)"
   echo "проверяю opencode внутри RPM: $OC_RPM"
   rm -rf /tmp/ocverify && mkdir -p /tmp/ocverify && cd /tmp/ocverify
-  rpm2cpio "$OC_RPM" | cpio -id --quiet "./usr/libexec/harbour-opencode/opencode" >/dev/null 2>&1 || true
-  if [ ! -f usr/libexec/harbour-opencode/opencode ]; then
+  rpm2cpio "$OC_RPM" | cpio -id --quiet "./home/harbour-opencode/opencode" >/dev/null 2>&1 || true
+  if [ ! -f home/harbour-opencode/opencode ]; then
     echo "ОШИБКА: не удалось извлечь opencode из RPM (rpm2cpio/cpio)"
     exit 1
   fi
-  OC_VERIFY="$(sha256sum usr/libexec/harbour-opencode/opencode | awk "{print \$1}")"
+  OC_VERIFY="$(sha256sum home/harbour-opencode/opencode | awk "{print \$1}")"
   echo "opencode в RPM sha256: $OC_VERIFY"
   if [ "$OC_VERIFY" != "$OC_SHA256" ]; then
     echo "ОШИБКА: в RPM уехал НЕ пинированный opencode."

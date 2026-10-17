@@ -23,6 +23,20 @@ BuildRequires:  qt5-qttools-linguist
 %global debug_package %{nil}
 %global __strip /bin/true
 
+# Heavy *helper* payload (bundled opencode, whisper-cli, piper) is installed
+# under %{payloaddir} on the /home partition — a large (tens of GB) separate
+# filesystem — and only the /usr/libexec/%{name} symlink lives in /usr (on the
+# small, often-full root partition). The client addresses these helpers by
+# absolute /usr/libexec paths, which resolve through the symlink; the desktop
+# file disables sailjail sandboxing, so /home is reachable at runtime.
+#
+# NOTE: the GUI launcher (harbour-opencode) MUST stay a real file in %{_bindir}.
+# libsailfishapp derives the app data dir from the *executable's directory*
+# (SailfishAppPriv::dataDir replaces the last path component of the exe's dir
+# with "share/"). A symlinked launcher resolves to /home/%{name}, so the app
+# would look for its QML under /home/share/%{name} → white screen.
+%define payloaddir /home/%{name}
+
 %description
 Native client for the opencode AI coding agent. Connects to the local
 opencode server over SSE and provides a Silica chat UI.
@@ -84,14 +98,21 @@ cd ../..
 %install
 MODE="${MBUILD_MODE:-debug}"
 rm -rf %{buildroot}
+# GUI launcher → real file in %{_bindir} (see the NOTE above: its location
+# determines the app data dir). Heavy helpers → %{payloaddir} (on /home).
 install -Dm 755 /home/mersdk/cargo-cache/cargo/$MODE/aarch64-unknown-linux-gnu/$MODE/harbour-opencode -t %{buildroot}%{_bindir}
-install -Dm 755 third_party/whisper.cpp/main %{buildroot}%{_libexecdir}/%{name}/whisper-cli
+PAYLOAD=%{buildroot}%{payloaddir}
+install -Dm 755 third_party/whisper.cpp/main $PAYLOAD/whisper-cli
 # Piper: the whole directory (binary + .so with RUNPATH=$ORIGIN + espeak-ng-data).
-mkdir -p %{buildroot}%{_libexecdir}/%{name}/piper
-cp -a /home/mersdk/cargo-cache/piper-aarch64/piper/. %{buildroot}%{_libexecdir}/%{name}/piper/
+mkdir -p $PAYLOAD/piper
+cp -a /home/mersdk/cargo-cache/piper-aarch64/piper/. $PAYLOAD/piper/
 echo "OC-SRC md5: $(md5sum /home/mersdk/cargo-cache/opencode-cli/opencode)"
-install -Dm 755 /home/mersdk/cargo-cache/opencode-cli/opencode %{buildroot}%{_libexecdir}/%{name}/opencode
-echo "OC-DST md5: $(md5sum %{buildroot}%{_libexecdir}/%{name}/opencode)"
+install -Dm 755 /home/mersdk/cargo-cache/opencode-cli/opencode $PAYLOAD/opencode
+echo "OC-DST md5: $(md5sum $PAYLOAD/opencode)"
+# /usr/libexec/%{name} is a symlink to %{payloaddir}; the client resolves its
+# helpers through it.
+install -d %{buildroot}%{_libexecdir}
+ln -s %{payloaddir} %{buildroot}%{_libexecdir}/%{name}
 install -Dm 644 opencode-client/assets/models.json -t %{buildroot}%{_datadir}/%{name}
 # Launcher icons in all recommended sizes (Sailfish icon guidelines).
 for size in 86x86 108x108 128x128 172x172; do
@@ -124,10 +145,9 @@ fi
 # - FILES ----------------------------------------------------------------------
 %files
 %defattr(-,root,root,-)
+%{payloaddir}
 %{_bindir}/harbour-opencode
-%{_libexecdir}/%{name}/whisper-cli
-%{_libexecdir}/%{name}/piper
-%{_libexecdir}/%{name}/opencode
+%{_libexecdir}/%{name}
 %{_datadir}/%{name}/qml
 %{_datadir}/%{name}/translations
 %{_datadir}/%{name}/models.json

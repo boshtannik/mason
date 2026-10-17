@@ -116,3 +116,35 @@ ALFED append len=53 prev=[[tool]]call_b45f...   <-- дубль
 **Тесты:** `opencode-client/src/event/dispatcher.rs` — `#[tokio::test] session_compacted_records_the_session_to_reload` (диспетч `session.compacted` пишет id в `StreamState::compacted`) и `compaction_part_announces_once_for_the_shown_session` (одна плашка на парт; взвод флага на текущую сессию, игнор чужой; сброс на `session.compacted`). Прогон: `make test` (proto, хостер) + `make test-sdk` (5 lib-тестов, зелёные).
 
 **Проверено вживую:** пользователь подтвердил плашку при ручном «Compact» (после релизной сборки).
+
+## Тяжёлый payload → /home, GUI-лаунчер остаётся в /usr/bin (2026-10-17)
+
+**Задача:** бандл (opencode CLI 185 МБ + piper + whisper-cli) занимал ~580 МБ на корневом разделе `/` (4.7 ГБ; свободно было ~262 МБ). `/home` — отдельный LUKS-раздел на 97 ГБ.
+
+**Раскладка после изменения** (`rpm/harbour-opencode.spec`, `%define payloaddir /home/%{name}`):
+- Тяжёлые хелперы → `/home/harbour-opencode/{opencode,whisper-cli,piper/}`.
+- `/usr/libexec/harbour-opencode` — **симлинк** на `/home/harbour-opencode`. Клиент обращается к хелперам абсолютными путями (`voice.rs`, `server.rs`), они резолвятся через симлинк.
+- `/usr/share/harbour-opencode/{qml,translations,models.json}` — как раньше.
+- `/usr/bin/harbour-opencode` — **реальный файл** (GUI-лаунчер), НЕ симлинк.
+
+**ПОЧЕМУ лаунчер обязан быть реальным файлом (главная грабля):**
+`libsailfishapp` вычисляет каталог данных из каталога исполняемого файла (`SailfishAppPriv::dataDir()`, `sailfishapp_priv.cpp`): берёт `exe.absolutePath()`, заменяет последний компонент пути на `share/` и приклеивает имя приложения. Если `/usr/bin/harbour-opencode` — симлинк, `/proc/self/exe` резолвится в `/home/harbour-opencode/...`, и dataDir становится `/home/share/harbour-opencode` → главный QML (`QmlApp::path_to`) не найден → **белый экран** (без внятной ошибки в логе). `applicationPath()` берёт абсолютный argv[0] как есть, иначе `applicationFilePath()`; лаунчер передаёт bare `Exec=harbour-opencode` (в `.desktop`), поэтому симлинк всё ломает.
+Симптом на глаз: «открываю приложение — белый экран» (не путать с ошибкой QML/синтаксиса — здесь QML вообще не грузится).
+Быстрая диагностика: структура RPM — `7z x -so harbour-opencode-*.rpm | cpio -itv`; exec через симлинк — `ls -l /usr/libexec/harbour-opencode/opencode`.
+
+**Освобождение корня:** на `/` остались только GUI-бинарник (~18 МБ) + QML/иконки/переводы; `df -h /`: с ~262 МБ до ~786 МБ свободно.
+
+**Грабли обновления (каталог→симлинк):**
+- Прежняя раскладка держала `/usr/libexec/%{name}` как КАТАЛОГ; новая — СИМЛИНК. In-place `rpm -Uvh` падает: `cpio: File from package already exists as a directory in system`. А `rpm -e` иногда оставляет ПУСТЫЕ каталоги → установка снова падает.
+- Рабочая процедура перехода (разовая):
+  1. `pkill -x harbour-opencode` (и `harbour-glas`).
+  2. `devel-su rpm -e --nodeps harbour-opencode harbour-glas`.
+  3. `devel-su rm -rf /usr/libexec/harbour-opencode /usr/libexec/harbour-glas /usr/share/harbour-opencode /usr/share/harbour-glas /home/harbour-opencode /home/harbour-glas /usr/bin/harbour-opencode /usr/bin/harbour-glas` (+ `.desktop`/иконки при надобности).
+  4. `devel-su rpm -Uvh harbour-opencode-*.rpm harbour-glas-*.rpm`.
+- Последующие обновления (симлинк→симлинк) обычным `rpm -Uvh` проходят нормально — чистка нужна только на разовый переход.
+
+**rpmlint (ожидаемо, сборку не роняет):** `E: dir-or-file-in-home` (файлы в /home) и `E: binary-or-shlib-defines-rpath … $ORIGIN` (piper — пришёл из готового aarch64-билда). В сборочном образе включён `TreatErrorsAsWarnings`, поэтому успех.
+
+**mbuild.sh (грабля кавычек):** docker-скрипт целиком в ОДИНАРНЫХ кавычках (чтобы `$VAR` доехали до контейнера), поэтому внутренние кавычки надо писать ДВОЙНЫМИ. Иначе `printf '%s\n'` доезжало как `printf %sn` и в `opencode.version` попадало `1.19.0n` → opencode качался заново на каждой сборке. Verify теперь извлекает `./home/harbour-opencode/opencode`.
+
+**Затронуто:** `rpm/harbour-opencode.spec`, `mbuild.sh`; в репозитории Glas — `rpm/harbour-glas.spec` (то же решение).
