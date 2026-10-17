@@ -148,3 +148,24 @@ ALFED append len=53 prev=[[tool]]call_b45f...   <-- дубль
 **mbuild.sh (грабля кавычек):** docker-скрипт целиком в ОДИНАРНЫХ кавычках (чтобы `$VAR` доехали до контейнера), поэтому внутренние кавычки надо писать ДВОЙНЫМИ. Иначе `printf '%s\n'` доезжало как `printf %sn` и в `opencode.version` попадало `1.19.0n` → opencode качался заново на каждой сборке. Verify теперь извлекает `./home/harbour-opencode/opencode`.
 
 **Затронуто:** `rpm/harbour-opencode.spec`, `mbuild.sh`; в репозитории Glas — `rpm/harbour-glas.spec` (то же решение).
+
+## Сервер не стартовал: пустой workdir в settings.json (2026-10-17)
+
+**Симптом:** после установки RPM с переносом payload в `/home` при открытии приложения GUI не мог подключиться к `opencode serve`. В `app.log` одна строка:
+`failed to start opencode serve: не удалось запустить /usr/libexec/harbour-opencode/opencode: Нет такого файла или каталога (os error 2)`.
+
+**К муву в /home баг отношения НЕ имел** — совпадение по времени. Бинарник через SSH запускался (`opencode --version` → 1.19.0), симлинк `/usr/libexec/harbour-opencode` → `/home/harbour-opencode` на месте.
+
+**Цепочка бага:**
+1. Страница настроек (`GlobalSettingsPage.qml`): `onActiveFocusChanged` у поля workdir сохраняет `text` даже ПУСТЫМ → `set_workdir("")` → `settings.json` = `{"workdir":""}`.
+2. При старте `Settings::load()`: `#[serde(default = "default_workdir")]` срабатывает только при ОТСУТСТВИЮЩЕМ ключе; пустая строка проходила как есть → `workdir=""`.
+3. `cmd.current_dir("")` → в дочернем процессе `chdir("")` → ENOENT; Rust `Command::spawn` возвращает этот errno как «os error 2» (создание каталога молча игнорировалось: `let _ = create_dir_all`).
+
+**Фикс (defense in depth):**
+- `settings.rs`: `Settings::sanitize()` — пустой/whitespace workdir заменяется дефолтом в `load()` и `save()` (лог `workdir is empty — falling back to the default`);
+- `server.rs`: `ServerGuard::start` отфильтровывает пустой `cwd` перед `current_dir` + громкий лог при неудачном `create_dir_all`;
+- `main.rs`: `create_dir_all` рабочего каталога больше не игнорируется молча.
+
+**Диагностика на телефоне:** `cat ~/.config/harbour-opencode/settings.json` (пустой workdir = вот он), `tail ~/.cache/harbour-opencode/app.log`, `ls -l /usr/libexec/harbour-opencode/opencode`, ручной запуск бинарника по тому же пути.
+
+**Затронуто:** `opencode-client/src/settings.rs`, `opencode-client/src/server.rs`, `opencode-client/src/main.rs`.

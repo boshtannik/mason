@@ -34,17 +34,31 @@ fn settings_path() -> PathBuf {
 }
 
 impl Settings {
+    /// An empty workdir breaks `opencode serve`: the child's `chdir("")`
+    /// fails with ENOENT and ServerGuard never starts. `serde(default)`
+    /// only covers a MISSING key — a stale `{"workdir":""}` (written by the
+    /// settings page when the field loses focus while empty) slipped through.
+    fn sanitize(&mut self) {
+        if self.workdir.trim().is_empty() {
+            log::warn!("settings: workdir is empty — falling back to the default");
+            self.workdir = default_workdir();
+        }
+    }
+
     /// Read settings from disk; missing keys/file fall back to defaults.
     pub fn load() -> Settings {
         let p = settings_path();
-        std::fs::read_to_string(&p)
+        let mut st: Settings = std::fs::read_to_string(&p)
             .ok()
             .and_then(|txt| serde_json::from_str(&txt).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        st.sanitize();
+        st
     }
 
     /// Write settings to disk, creating the directory if needed.
-    pub fn save(&self) {
+    pub fn save(&mut self) {
+        self.sanitize();
         let p = settings_path();
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);

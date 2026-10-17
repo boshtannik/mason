@@ -169,7 +169,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             rt.block_on(async move {
                 let st = Settings::load();
                 let cwd = std::path::PathBuf::from(&st.workdir);
-                let _ = std::fs::create_dir_all(&cwd);
+                if let Err(e) = std::fs::create_dir_all(&cwd) {
+                    log::warn!("failed to create workdir {cwd:?}: {e}");
+                }
                 let guard = server::ServerGuard::start(server::ServerConfig { cwd: Some(cwd), ..Default::default() }).await;
                 let base = match &guard {
                     Ok(g) => {
@@ -1110,13 +1112,14 @@ reasonings.clear();
                         }
 
                         Cmd::GetSettings => {
-                            let st = Settings::load();
+                            let mut st = Settings::load();
                             st.save();
                             if let Ok(mut g) = settings.lock() {
                                 *g = st.to_json();
                             }
                         }
                         Cmd::SaveSettings { value } => {
+                            let mut value = value.clone();
                             value.save();
                             if let Ok(mut g) = settings.lock() {
                                 *g = value.to_json();

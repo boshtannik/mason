@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use tokio::time::sleep;
 
 use crate::api::OpenCodeClient;
@@ -59,11 +59,16 @@ impl ServerGuard {
 
         let mut cmd = Command::new(&bin);
         let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".into());
+        // An empty cwd would make the child's chdir fail with ENOENT
+        // (Command::spawn reports it as os error 2) — fall back to the default.
         let cwd = cfg
             .cwd
             .clone()
+            .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| PathBuf::from(&home).join("opencode-home"));
-        let _ = std::fs::create_dir_all(&cwd);
+        if let Err(e) = std::fs::create_dir_all(&cwd) {
+            warn!("failed to create cwd {cwd:?}: {e}");
+        }
         cmd.current_dir(&cwd)
             .env("HOME", &home)
             .env("XDG_CONFIG_HOME", format!("{home}/.config"))
